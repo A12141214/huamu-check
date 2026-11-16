@@ -1,0 +1,12 @@
+[theme]
+primaryColor = "#2E7D32"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F7F4"
+textColor = "#1F2A1F"
+
+[client]
+# 隐藏右上角 Deploy 按钮和开发者菜单，对外演示/给店员用时更干净
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

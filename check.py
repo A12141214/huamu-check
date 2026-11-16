@@ -1,0 +1,461 @@
+"""check.py —— 沭阳花木抖音口播文案：硬规则检查 + DeepSeek 合规改写。
+
+流程：硬规则先扫（零成本）→ 命中才调 DeepSeek 改写 → 未命中直接返回“无需改写”。
+没有命中时不消耗任何 API 费用。
+
+用法：
+    python check.py "家人们看这棵桂花，四季开花，养死包赔……"
+    python check.py "文案" --no-ai        # 只做规则体检，不调模型、不花钱
+    python check.py "文案" --json         # 机器可读输出（hits + advice）
+    python check.py --file scripts.txt    # 批量：每行一条口播，逐条检查
+    python check.py --selftest            # 离线自检，不联网
+
+环境变量：
+    DEEPSEEK_API_KEY   仅命中规则后才需要（可写在项目根目录 .env，或显式传 api_key=）
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from typing import Any
+
+from openai import OpenAI
+
+# Windows 控制台默认 GBK，中文输出会变乱码；强制 UTF-8，管道重定向时也一样
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RULES_PATH = os.path.join(BASE_DIR, "rules.json")
+REPLACEMENTS_PATH = os.path.join(BASE_DIR, "replacements.json")
+
+BASE_URL = "https://api.deepseek.com"
+MODEL = "deepseek-chat"
+MAX_TOKENS = 3000
+
+# 风险从高到低；用于排序，让“极高”永远排在最前面
+RISK_ORDER = {"极高": 0, "高": 1, "中": 2, "低": 3}
+
+# 命中词 -> 替换分组。分组选取靠“原文实际命中片段”判断，不看规则 id。
+GROUP_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "售后承诺类": ("养死", "包赔", "包退", "包活", "包开花", "包结果", "包发芽", "补发", "冻坏", "不赔", "不售后", "不负责", "不管"),
+    "花期与生长属性类": ("四季", "全年", "三季", "开花", "挂果", "常绿", "百日红", "320天"),
+    "种植难度与区域类": ("南北方", "全国", "哪里", "随便种", "浇水", "沾土", "放养", "不用管", "死不了"),
+    "品种与规格类": ("五彩", "红粉", "中国红", "牡丹玉兰", "虚构"),
+    "绝对化用语类": ("最低", "最便宜", "第一", "绝对", "100%", "百分百", "唯一", "独家", "顶级", "首选"),
+}
+
+SYSTEM_PROMPT = """你是沭阳花木产业带抖音直播间的合规文案编辑。商家给你的口播稿可能踩了平台红线，你要在不牺牲销售节奏的前提下，把违规点改成能过审、又不夸大的说法。
+
+改写原则：
+1. 只替换违规表述，保留原文的品种、规格、价格、活动信息，一个字都不要新增或脑补。
+2. 售后承诺只能落到“7天绿植险”，并且必须加“以商品详情页标注为准”的括注。除“7天绿植险”外，不得承诺任何“包赔/包退/包补发/包活/包开花/包结果”。
+3. 花期、挂果期、常绿与否，只能按替换参考里的真实习性写；参考里没有的品种，就写“具体花期/习性以详情页或品种说明为准”，不要猜。
+4. 不编造品种名。原文用了虚构品种名（如“五彩月季”“中国红玉兰”），改写时只提示应改用什么规范名，不要把它当成真品种继续宣传。
+5. 删除绝对化用语和“全国可种/怎么养都活”这类保证性表述，改成客观、可验证的说法。
+6. 保持口播感：短句、口语、有称呼（家人们/哥几个）、有节奏，不要写成公文。
+7. 改写结果不得再次命中任何硬规则，也不得出现新的保证性承诺。
+"""
+
+
+class CheckError(RuntimeError):
+    """规则库/替换表不可用，或模型输出不合预期时抛出。"""
+
+
+# ========== 1. 配置加载 ==========
+def _load_dotenv() -> None:
+    """极简 .env 读取：只补全尚未设置的环境变量，不覆盖已有值。
+
+    依次在 check.py 同目录、上级目录、上上级目录找 .env，
+    这样本模块放在子文件夹里也能复用项目根目录的 .env。
+    """
+    for rel in (".", "..", os.path.join("..", "..")):
+        path = os.path.normpath(os.path.join(BASE_DIR, rel, ".env"))
+        if not os.path.isfile(path):
+            continue
+        # utf-8-sig：兼容 Windows 记事本/PowerShell 写出的带 BOM 文件
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key, value = key.strip(), value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+        return
+
+
+def _read_json(path: str) -> Any:
+    if not os.path.isfile(path):
+        raise CheckError(f"找不到文件：{path}")
+    with open(path, "r", encoding="utf-8-sig") as fh:
+        try:
+            return json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise CheckError(f"{os.path.basename(path)} 不是合法 JSON：{exc}") from exc
+
+
+def _compile_rule(item: dict[str, Any]) -> dict[str, Any]:
+    """把一条 JSON 规则编译成内部结构；正则写错在这里就报出来。"""
+    rid = str(item.get("id") or "").strip()
+    if not rid:
+        raise CheckError(f"规则缺 id：{item!r}")
+    regex = item.get("regex")
+    if not hasattr(regex, "finditer"):
+        # 只接受手写的 {id, pattern, ...} 字典；已编译的规则带上 regex 直接复用
+        pattern = item.get("pattern")
+        if not pattern:
+            raise CheckError(f"规则 {rid} 缺 pattern")
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            raise CheckError(f"规则 {rid} 的正则无法编译：{pattern!r}（{exc}）") from exc
+    return {
+        "id": rid,
+        "risk": str(item.get("risk") or "中"),
+        "reason": str(item.get("reason") or ""),
+        "source": str(item.get("source") or ""),
+        "regex": regex,
+        # 可选扩展：命中处前后若出现这些词，则忽略该次命中（用来压误报）
+        "exclude": tuple(item.get("exclude") or ()),
+    }
+
+
+def load_rules(path: str = RULES_PATH) -> list[dict[str, Any]]:
+    """读取并编译规则库。"""
+    rules = _read_json(path).get("rules")
+    if not isinstance(rules, list) or not rules:
+        raise CheckError("rules.json 缺少非空的 rules 数组")
+    return [_compile_rule(item) for item in rules]
+
+
+def load_replacements(path: str = REPLACEMENTS_PATH) -> dict[str, dict[str, str]]:
+    data = _read_json(path)
+    if not isinstance(data, dict) or not data:
+        raise CheckError("replacements.json 为空或格式不对")
+    return {k: v for k, v in data.items() if isinstance(v, dict)}
+
+
+# ========== 2. 硬规则匹配 ==========
+def _snippet(text: str, start: int, end: int, width: int = 10) -> str:
+    """把命中位置连上下文拼出来，方便商家在稿子里定位。"""
+    left = text[max(0, start - width) : start]
+    right = text[end : end + width]
+    return f"{left}【{text[start:end]}】{right}"
+
+
+def lint(text: str, rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """扫一遍硬规则，返回命中列表（同一位置只报一次，按风险与位置排序）。"""
+    rules = rules if rules is not None else load_rules()
+    rules = [_compile_rule(r) for r in rules]
+    hits: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, int]] = set()
+
+    for rule in rules:
+        for m in rule["regex"].finditer(text):
+            # group(0) 才是完整命中（如“冻坏不赔”），不是第一个捕获组
+            matched = m.group(0)
+            span = (m.start(), m.end())
+            if not matched.strip():
+                continue
+            # 豁免词看前后各两个字，才能拦住“第一次”“第一年”这类固定搭配
+            window = text[max(0, span[0] - 2) : span[1] + 4]
+            if any(word in window for word in rule["exclude"]):
+                continue
+            if (rule["id"], *span) in seen:
+                continue
+            seen.add((rule["id"], *span))
+            hits.append(
+                {
+                    "rule_id": rule["id"],
+                    "risk": rule["risk"],
+                    "matched": matched,
+                    "start": span[0],
+                    "end": span[1],
+                    "context": _snippet(text, span[0], span[1]),
+                    "reason": rule["reason"],
+                    "source": rule["source"],
+                }
+            )
+
+    hits.sort(key=lambda h: (RISK_ORDER.get(h["risk"], 9), h["start"]))
+    return hits
+
+
+# ========== 3. 构建替换参考 ==========
+def build_replacement_context(
+    hits: list[dict[str, Any]],
+    replacements: dict[str, dict[str, str]] | None = None,
+) -> dict[str, dict[str, str]]:
+    """只把与命中相关的替换组拿出来，避免 prompt 过长、也避免模型被无关例句带跑。"""
+    replacements = replacements if replacements is not None else load_replacements()
+    hit_text = " ".join(h["matched"] for h in hits)
+
+    relevant: dict[str, dict[str, str]] = {}
+    for group, keywords in GROUP_KEYWORDS.items():
+        if group in replacements and any(kw in hit_text for kw in keywords):
+            relevant[group] = replacements[group]
+    return relevant
+
+
+# ========== 4. DeepSeek 改写 ==========
+def _make_client(api_key: str | None) -> OpenAI:
+    _load_dotenv()
+    key = (api_key or os.getenv("DEEPSEEK_API_KEY") or "").strip()
+    if not key:
+        raise CheckError("缺少 DEEPSEEK_API_KEY：请设置环境变量，或在项目根目录 .env 里写 DEEPSEEK_API_KEY=sk-...")
+    return OpenAI(api_key=key, base_url=BASE_URL, timeout=120, max_retries=2)
+
+
+def _build_prompt(text: str, hits: list[dict[str, Any]], replacement_context: dict[str, Any]) -> str:
+    hit_context = json.dumps(
+        [
+            {
+                "rule_id": h["rule_id"],
+                "risk": h["risk"],
+                "matched": h["matched"],
+                "context": h["context"],
+                "reason": h["reason"],
+                "source": h["source"],
+            }
+            for h in hits
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+    return f"""下面是一段沭阳花木抖音口播文案、硬规则命中的违规点，以及针对这些违规类型的替换参考。
+
+【原文案】
+{text}
+
+【硬规则命中的违规点】
+{hit_context}
+
+【替换参考（优先采用这里的合规说法，但要按原文语境自然融入，不要生硬拼接）】
+{json.dumps(replacement_context, ensure_ascii=False, indent=2)}
+
+请完成两件事：
+
+1. 【逐条说明】针对每一条命中规则，用一两句话说明它为什么可能违规。必须引用上面给出的 reason 和 source，不要自己编造依据、法条或案例。
+
+2. 【改写文案】给出一段完整的改写后口播文案。要求：
+   - 把违规表述替换为合规的、卖家口播时自然能说出口的表达；
+   - 不要编造原文案中没有的品种信息、花期或生长属性；信息不足时用“具体花期/习性以详情页或品种说明为准”这类中性表述，不要猜；
+   - 保留原文案的口播感和销售节奏，不要改成书面公文；
+   - 改写后不得再出现任何保证性承诺（7天绿植险除外），也不得新增绝对化用语。
+
+严格按以下格式输出：
+
+【逐条说明】
+- R00X（风险等级）：……（依据：……）
+
+【改写文案】
+……"""
+
+
+def rewrite_with_deepseek(
+    text: str,
+    hits: list[dict[str, Any]],
+    *,
+    api_key: str | None = None,
+    replacements: dict[str, dict[str, str]] | None = None,
+    model: str = MODEL,
+    temperature: float = 0.3,
+    max_tokens: int = MAX_TOKENS,
+    client: OpenAI | None = None,
+) -> str:
+    """把原文案交给 DeepSeek 改写，返回带“逐条说明 + 改写文案”的完整文本。"""
+    if not hits:
+        raise CheckError("没有命中规则，不需要调用模型")
+
+    prompt = _build_prompt(text, hits, build_replacement_context(hits, replacements))
+    client = client or _make_client(api_key)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    content = (response.choices[0].message.content or "").strip()
+    if not content:
+        raise CheckError("模型返回了空内容，可重试一次")
+    return content
+
+
+# ========== 5. 主流程 ==========
+def check(
+    text: str,
+    *,
+    rewrite: bool = True,
+    api_key: str | None = None,
+    rules: list[dict[str, Any]] | None = None,
+    replacements: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """检查并（可选）改写一条文案。
+
+    返回 {"text", "hits", "advice", "rewritten"}；未命中规则时 advice 为 None、rewritten False。
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("文案不能为空")
+
+    rules = rules if rules is not None else load_rules()
+    replacements = replacements if replacements is not None else load_replacements()
+    hits = lint(text, rules)
+
+    result: dict[str, Any] = {"text": text, "hits": hits, "advice": None, "rewritten": False}
+    if not hits or not rewrite:
+        return result
+
+    result["advice"] = rewrite_with_deepseek(text, hits, api_key=api_key, replacements=replacements)
+    result["rewritten"] = True
+    return result
+
+
+def _print_human(result: dict[str, Any]) -> None:
+    print("=" * 56)
+    print("原文案：")
+    print(result["text"])
+    print(f"\n硬规则命中：{len(result['hits'])} 条")
+
+    for h in result["hits"]:
+        print(f"  [{h['risk']}] {h['rule_id']}  命中：{h['matched']}")
+        print(f"       位置：{h['context']}")
+        print(f"       依据：{h['source']}")
+
+    if not result["hits"]:
+        print("\n未命中硬规则，无需调用模型改写。")
+    elif not result["rewritten"]:
+        print("\n已跳过 AI 改写（--no-ai），以上仅规则体检结果。")
+    else:
+        print("\n" + "-" * 56)
+        print(result["advice"])
+
+    print("\n" + "-" * 56)
+    print("提示：以上结果为 AI 辅助建议，规则出处已标注，最终发布前请人工确认。")
+    print("      规则库未覆盖的语义层风险（如暗示疗效、贬低同行）仍需人工判断。")
+
+
+def _selftest() -> int:
+    """离线自检：只验证规则匹配与替换分组，不联网、不烧 token。"""
+    rules = load_rules()
+    replacements = load_replacements()
+
+    def ids(text: str) -> list[str]:
+        return [h["rule_id"] for h in lint(text, rules)]
+
+    cases: list[tuple[str, list[str]]] = [
+        ("家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！", ["R001", "R003", "R004"]),
+        ("不拍保温棉，冻坏不赔啊", ["R002"]),
+        ("南北方均可种植，浇水就活，新手也能养", ["R005", "R006"]),
+        ("玉兰四季开花，一年开三季", ["R003"]),
+        ("这款月季含7天绿植险，秋季盛花，具体以详情页为准", []),
+        ("产地直发，今天拍明天发，苗龄两年", []),
+    ]
+
+    failures = 0
+    for text, expect in cases:
+        got = ids(text)
+        ok = got == expect
+        failures += 0 if ok else 1
+        print(f"{'PASS' if ok else 'FAIL'}  期望 {expect} 实际 {got}   {text}")
+
+    # 关键回归：R002 必须报完整片段“冻坏不赔”，并且能带出售后承诺类的替换组
+    hit = lint("不拍保温棉，冻坏不赔啊", rules)[0]
+    ok = hit["matched"] == "冻坏不赔"
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  完整命中片段（不是只有捕获组）实际 {hit['matched']!r}")
+
+    groups = build_replacement_context([hit], replacements)
+    ok = "售后承诺类" in groups
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  R002 能带出售后承诺类替换组 实际 {list(groups)}")
+
+    # 风控：命中排序必须是“极高”在前
+    ok = ids("全网最低价，养死包赔") == ["R001", "R004"]
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  按风险排序，极高优先")
+
+    # exclude 扩展：命中但含豁免词时不报
+    custom = [{"id": "T1", "pattern": "第一", "risk": "高", "reason": "-", "source": "-", "exclude": ["第一次"]}]
+    ok = lint("第一次养花", custom) == [] and len(lint("全网第一", custom)) == 1
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  exclude 豁免词生效")
+
+    print(f"\n自检结果：{'全部通过' if failures == 0 else f'{failures} 项失败'}")
+    return 0 if failures == 0 else 1
+
+
+def _main(argv: list[str]) -> int:
+    rewrite = "--no-ai" not in argv
+    as_json = "--json" in argv
+    file_path: str | None = None
+    words: list[str] = []
+
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token in ("--no-ai", "--json"):
+            i += 1
+            continue
+        if token == "--file" and i + 1 < len(argv):
+            file_path = argv[i + 1]
+            i += 2
+            continue
+        if token.startswith("--file="):
+            file_path = token.split("=", 1)[1]
+            i += 1
+            continue
+        if not token.startswith("--"):
+            words.append(token)
+        i += 1
+
+    texts: list[str] = []
+    if file_path:
+        if not os.path.isfile(file_path):
+            print(f"找不到文件：{file_path}", file=sys.stderr)
+            return 2
+        with open(file_path, "r", encoding="utf-8-sig") as fh:
+            texts = [line.strip() for line in fh if line.strip()]
+    else:
+        single = " ".join(words).strip() or sys.stdin.read().strip()
+        texts = [single] if single else []
+
+    if not texts:
+        print(
+            '用法：python check.py "家人们看这棵桂花，四季开花，养死包赔……" [--no-ai] [--json] [--file 稿件.txt]',
+            file=sys.stderr,
+        )
+        return 2
+
+    results = []
+    for text in texts:
+        try:
+            results.append(check(text, rewrite=rewrite))
+        except Exception as exc:  # noqa: BLE001 - CLI 入口统一兜底
+            print(f"失败：{exc}", file=sys.stderr)
+            return 1
+
+    if as_json:
+        payload = results if len(results) > 1 else results[0]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        for idx, result in enumerate(results):
+            if idx:
+                print()
+            _print_human(result)
+    return 0
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        raise SystemExit(_selftest())
+    raise SystemExit(_main(sys.argv[1:]))

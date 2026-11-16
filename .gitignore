@@ -1,0 +1,11 @@
+# 密钥
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地临时目录
+.tmp/
