@@ -25,6 +25,26 @@
 | `.streamlit/config.toml` | 主题色 + 关闭使用统计 |
 | `.streamlit/secrets.toml.example` | 云端部署的 Key 模板 |
 
+## 静态版（不用部署，直接有公网地址）
+
+`docs/checker.html` 是**单文件纯前端**版本：无服务器、无账号、无 API 调用，打开就能用。
+它由 `build_static.py` 从 `rules.json` 生成，规则同源，不会两边不一致。
+
+```powershell
+python build_static.py      # 改完 rules.json 后重新生成
+```
+
+公网地址（jsDelivr 直出仓库文件，国内可访问）：
+
+```
+https://cdn.jsdelivr.net/gh/A12141214/huamu-check@main/docs/checker.html
+```
+
+- 给店员、同行直接用这个链接，**零成本、不限次数**
+- 只能做规则体检（标红 + 依据 + 合规说法建议），**没有 AI 改写**——改写要调模型，前端放 API Key 等于公开泄露
+- 想改颜色/文案直接改 `build_static.py` 里的模板再重新生成
+- jsDelivr 有缓存：改了规则后大约 10 分钟生效，急用可打开 `@main` 换成 `@<commit短哈希>`
+
 ## 网页版（Streamlit）
 
 ```powershell
