@@ -31,12 +31,12 @@ st.set_page_config(
 
 
 # ========== 资源与配置 ==========
-@st.cache_resource(show_spinner=False)
+# 故意不加 @st.cache_resource：rules.json 只有 3KB，每次 rerun 重读的代价可以忽略，
+# 而加缓存会导致「改了 JSON 刷新页面却不生效」，运营会以为规则坏了。
 def load_rules() -> list[dict]:
     return core.load_rules()
 
 
-@st.cache_resource(show_spinner=False)
 def load_replacements() -> dict:
     return core.load_replacements()
 
@@ -108,6 +108,13 @@ st.caption(
 
 SAMPLE = "家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！"
 
+
+def _fill_sample() -> None:
+    """按钮回调里改 session_state 是安全的（此时 widget 还没重新实例化）。"""
+    st.session_state["single_text"] = SAMPLE
+    st.session_state.pop("result", None)
+
+
 tab_single, tab_batch, tab_rules = st.tabs(["单条校验", "批量体检（不调模型）", "规则库"])
 
 # ---------- 单条校验 ----------
@@ -124,9 +131,9 @@ with tab_single:
         )
         col_run, col_sample, col_skip = st.columns([2, 1, 2])
         run = col_run.button("开始校验", type="primary", use_container_width=True)
-        if col_sample.button("填入示例", use_container_width=True):
-            st.session_state["single_text"] = SAMPLE
-            st.rerun()
+        # 必须用 on_click 回调：脚本跑起来之后不能再改已有 widget 的 session_state，
+        # 直接赋值会抛 StreamlitWidgetAlreadyInstantiatedError。
+        col_sample.button("填入示例", use_container_width=True, on_click=_fill_sample)
         rule_only = col_skip.checkbox("只做规则体检（不调模型）", value=False)
 
         if run:

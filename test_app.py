@@ -59,6 +59,21 @@ def run(use_ai: bool) -> int:
     at.button[0].click().run()
     report("合规稿命中 0 条", any("未命中硬规则" in str(s.value) for s in at.success))
 
+    # --- 4b. 回归：点「填入示例」不能崩 ---
+    # 曾经的写法在脚本跑完后直接赋值 session_state，会抛
+    # StreamlitWidgetAlreadyInstantiatedError，线上表现为点按钮就红屏。
+    at = AppTest.from_file("app.py", default_timeout=120).run()
+    for btn in at.button:
+        if "填入示例" in btn.label:
+            btn.click().run()
+            break
+    report("填入示例无异常", not at.exception, _text_of(at.exception))
+    report(
+        "填入示例后文本框已填充",
+        "桂花" in (at.text_area(key="single_text").value or ""),
+        repr((at.text_area(key="single_text").value or "")[:20]),
+    )
+
     # --- 5. 改写路径 ---
     if use_ai:
         at = AppTest.from_file("app.py", default_timeout=300).run()
