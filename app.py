@@ -106,6 +106,21 @@ st.caption(
     "未命中不调用模型、不计费。"
 )
 
+# 配置自检：云端 Secrets 写错键名/没保存，从界面上就能看出来，不用靠猜
+with st.sidebar:
+    st.subheader("配置自检")
+    try:
+        secret_names = list(st.secrets.keys())  # type: ignore[attr-defined]
+    except Exception:
+        secret_names = []
+    st.caption("Secrets 键：" + ("、".join(secret_names) if secret_names else "（没有读到任何键）"))
+    st.caption("API Key：" + ("✅ 已读取" if get_api_key() else "❌ 未配置"))
+    st.divider()
+    st.caption(
+        "云端配置路径：应用页 `⋮` → `Settings` → `Secrets`，"
+        '内容为 `DEEPSEEK_API_KEY = "sk-..."`，保存后应用会自动重启。'
+    )
+
 SAMPLE = "家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！"
 
 
