@@ -1,13 +1,10 @@
-"""app.py —— 花木口播文案合规校验（Streamlit 网页版）。
+"""app.py —— 花木口播文案合规校验（Streamlit 网页版 · 多条批量）。
 
 界面层只负责展示；规则匹配、替换分组、模型改写全部复用 check.py，
 避免两份逻辑各改各的、线上和本地结果不一致。
 
 本地运行：
     streamlit run app.py
-
-Streamlit Community Cloud 部署：上传 app.py / check.py / rules.json /
-replacements.json / requirements.txt，API Key 写在 Secrets 里。
 """
 
 from __future__ import annotations
@@ -15,24 +12,113 @@ from __future__ import annotations
 import html
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as core  # noqa: E402  - 复用检测/改写逻辑，这里不重复实现
 
-RISK_BADGE = {"极高": "🔴", "高": "🟠", "中": "🟡", "低": "🟢"}
-
 st.set_page_config(
     page_title="花木口播文案合规校验",
     page_icon="🌿",
     layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+RISK_BADGE = {"极高": "🔴", "高": "🟠", "中": "🟡", "低": "🟢"}
+RISK_CLASS = {"极高": "hm-risk-a", "高": "hm-risk-b", "中": "hm-risk-c", "低": "hm-risk-d"}
+MAX_PARALLEL = 4
+
+# ---------- 样式 ----------
+st.markdown(
+    """
+<style>
+  :root{
+    --hm-ink:#16211a; --hm-muted:#68756b; --hm-green:#1f7a3f; --hm-green-l:#2f9e56;
+    --hm-line:#e3e9e4; --hm-card:#ffffff; --hm-bg:#f6f8f6;
+  }
+  .block-container{padding-top:1.6rem; padding-bottom:3rem; max-width:1240px;}
+  #MainMenu, footer{visibility:hidden;}
+
+  .hm-hero{
+    background:linear-gradient(135deg,#123d24 0%,#1f7a3f 55%,#2f9e56 100%);
+    border-radius:20px; padding:26px 30px; color:#fff; position:relative; overflow:hidden;
+    box-shadow:0 12px 30px -12px rgba(18,61,36,.55);
+  }
+  .hm-hero:after{
+    content:""; position:absolute; right:-40px; top:-60px; width:240px; height:240px;
+    background:radial-gradient(circle,rgba(255,255,255,.18),transparent 65%); border-radius:50%;
+  }
+  .hm-hero h1{margin:0 0 6px; font-size:27px; font-weight:700; letter-spacing:.3px; color:#fff;}
+  .hm-hero p{margin:0; color:#d8ecdd; font-size:14px;}
+  .hm-chips{margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;}
+  .hm-chip{
+    display:inline-block; padding:4px 11px; border-radius:999px; font-size:12.5px;
+    background:rgba(255,255,255,.14); color:#eaf6ec; border:1px solid rgba(255,255,255,.18);
+  }
+
+  .hm-card{
+    background:var(--hm-card); border:1px solid var(--hm-line); border-radius:16px;
+    padding:18px 20px; box-shadow:0 1px 2px rgba(16,24,18,.04);
+  }
+  .hm-item-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+  .hm-idx{
+    width:26px; height:26px; border-radius:8px; background:#eef4ef; color:#2a5b3c;
+    display:inline-flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;
+  }
+  .hm-risk{font-size:12px; padding:2px 9px; border-radius:999px; font-weight:600;}
+  .hm-risk-a{background:#fdeaea; color:#a31616;}
+  .hm-risk-b{background:#fdf0e3; color:#9a4b06;}
+  .hm-risk-c{background:#fdf6dd; color:#7d5c05;}
+  .hm-risk-d{background:#e9f5ec; color:#1f6b39;}
+  .hm-tag{
+    font-size:12px; padding:2px 9px; border-radius:999px; background:#f1f4f2;
+    color:#4a5a4f; border:1px solid #e6ebe7;
+  }
+  .hm-orig{
+    white-space:pre-wrap; line-height:1.95; font-size:15px;
+    background:#fbfcfb; border:1px solid #eef2ee; border-radius:12px; padding:13px 15px;
+  }
+  mark{background:#ffe0e0; color:#9c1010; padding:0 3px; border-radius:4px; font-weight:600;}
+
+  div[data-testid="stMetric"]{
+    background:var(--hm-card); border:1px solid var(--hm-line); border-radius:14px;
+    padding:14px 16px; box-shadow:0 1px 2px rgba(16,24,18,.04);
+  }
+  div[data-testid="stMetricValue"]{font-size:26px; font-weight:700; color:var(--hm-ink);}
+  div[data-testid="stMetricLabel"]{color:var(--hm-muted);}
+
+  .stButton>button{
+    border-radius:10px; border:1px solid var(--hm-line); font-weight:600;
+    transition:all .15s ease;
+  }
+  .stButton>button[kind="primary"]{
+    background:linear-gradient(135deg,#1f7a3f,#2f9e56); border:none;
+    box-shadow:0 6px 16px -8px rgba(31,122,63,.7);
+  }
+  .stButton>button[kind="primary"]:hover{transform:translateY(-1px); box-shadow:0 10px 20px -8px rgba(31,122,63,.8);}
+
+  .stTextArea textarea{border-radius:12px; border-color:var(--hm-line); font-size:15px; line-height:1.8;}
+  .stTextArea textarea:focus{box-shadow:0 0 0 3px rgba(47,158,86,.16); border-color:#7cc194;}
+
+  div[data-testid="stExpander"]{border-radius:12px; border-color:var(--hm-line);}
+  div[data-testid="stExpander"] summary{font-size:14px;}
+  /* 改写稿是整段口播，长句要换行，不要横向截断 */
+  div[data-testid="stCode"]{border-radius:12px; max-width:100%;}
+  div[data-testid="stCode"] pre{
+    white-space:pre-wrap !important; word-break:break-word; overflow-x:hidden;
+    line-height:1.95; font-size:14.5px; padding-right:6px;
+  }
+  .stTabs [data-baseweb="tab-list"]{gap:6px;}
+  .stTabs [data-baseweb="tab"]{border-radius:9px 9px 0 0; padding:8px 16px; font-weight:600;}
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
 
 # ========== 资源与配置 ==========
-# 故意不加 @st.cache_resource：rules.json 只有 3KB，每次 rerun 重读的代价可以忽略，
-# 而加缓存会导致「改了 JSON 刷新页面却不生效」，运营会以为规则坏了。
 def load_rules() -> list[dict]:
     return core.load_rules()
 
@@ -42,11 +128,7 @@ def load_replacements() -> dict:
 
 
 def get_api_key() -> str | None:
-    """优先级：侧栏临时填写 > Streamlit Secrets > 环境变量 / .env。
-
-    侧栏那个是给「找不到 Secrets 菜单」时兜底用的：只存在浏览器会话里，
-    不落盘、不进仓库，刷新页面需要重填。
-    """
+    """优先级：侧栏临时填写 > Streamlit Secrets > 环境变量 / .env。"""
     tmp = (st.session_state.get("tmp_key") or "").strip()
     if tmp:
         return tmp
@@ -56,7 +138,6 @@ def get_api_key() -> str | None:
             if key:
                 return key
     except Exception:
-        # 没有 secrets.toml 时 st.secrets 会抛异常，本地跑属于正常情况
         pass
     core._load_dotenv()
     return (os.getenv("DEEPSEEK_API_KEY") or "").strip() or None
@@ -64,7 +145,6 @@ def get_api_key() -> str | None:
 
 # ========== 展示辅助 ==========
 def merge_spans(hits: list[dict]) -> list[tuple[int, int]]:
-    """合并重叠命中，避免同一段文字被重复高亮。"""
     spans = sorted((h["start"], h["end"]) for h in hits)
     merged: list[list[int]] = []
     for start, end in spans:
@@ -76,27 +156,21 @@ def merge_spans(hits: list[dict]) -> list[tuple[int, int]]:
 
 
 def highlight(text: str, hits: list[dict]) -> str:
-    """把命中片段标红，商家一眼能在原稿里定位。"""
     parts: list[str] = []
     cursor = 0
     for start, end in merge_spans(hits):
         parts.append(html.escape(text[cursor:start]))
-        parts.append(
-            '<mark style="background:#ffd8d8;color:#a40000;padding:0 3px;'
-            f'border-radius:4px;font-weight:600;">{html.escape(text[start:end])}</mark>'
-        )
+        parts.append(f"<mark>{html.escape(text[start:end])}</mark>")
         cursor = end
     parts.append(html.escape(text[cursor:]))
     return "".join(parts)
 
 
 def split_advice(advice: str) -> tuple[str, str]:
-    """把模型输出拆成「逐条说明」和「改写文案」两块。"""
     if "【改写文案】" not in advice:
         return advice.strip(), ""
     head, tail = advice.split("【改写文案】", 1)
-    head = head.replace("【逐条说明】", "").strip()
-    return head, tail.strip()
+    return head.replace("【逐条说明】", "").strip(), tail.strip()
 
 
 def top_risk(hits: list[dict]) -> str:
@@ -108,272 +182,269 @@ rules = load_rules()
 replacements = load_replacements()
 categories = core.load_categories()
 auto_rules = [r for r in rules if not r["manual_review"]]
-manual_rules = [r for r in rules if r["manual_review"]]
 manual_items = core.manual_review_items(rules, categories)
 
-st.title("🌿 花木口播文案合规校验")
-st.caption(
-    f"粘贴抖音花木口播文案 → 扫 {len(auto_rules)} 条硬红线（{len(categories)} 个类别）→ "
-    "命中后给出依据与合规改写。未命中不调用模型、不计费。"
+st.markdown(
+    f"""
+<div class="hm-hero">
+  <h1>🌿 花木口播文案合规校验</h1>
+  <p>粘贴整场脚本，一行一条 —— 自动标红违规说法、给出官方依据、生成合规改写</p>
+  <div class="hm-chips">
+    <span class="hm-chip">{len(auto_rules)} 条硬规则</span>
+    <span class="hm-chip">{len(categories)} 个类别</span>
+    <span class="hm-chip">{len(manual_items)} 条人工复核</span>
+    <span class="hm-chip">未命中不调用模型 · 不计费</span>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
-# 配置自检：云端 Secrets 写错键名/没保存，从界面上就能看出来，不用靠猜
 with st.sidebar:
-    st.subheader("配置自检")
+    st.markdown("#### 配置自检")
     try:
         secret_names = list(st.secrets.keys())  # type: ignore[attr-defined]
     except Exception:
         secret_names = []
-    st.caption("Secrets 键：" + ("、".join(secret_names) if secret_names else "（没有读到任何键）"))
-    st.caption("API Key：" + ("✅ 已读取" if get_api_key() else "❌ 未配置"))
-
-    if not get_api_key():
+    key_ready = bool(get_api_key())
+    st.markdown(
+        f"""<div class="hm-card" style="padding:14px 16px">
+        <div style="font-size:13px;color:#68756b">Secrets 键</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:10px">
+          {'、'.join(secret_names) if secret_names else '（未读到）'}</div>
+        <div style="font-size:13px;color:#68756b">API Key</div>
+        <div style="font-size:14px;font-weight:600">{'✅ 已就绪' if key_ready else '❌ 未配置'}</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+    if not key_ready:
         st.text_input(
-            "临时 API Key（不保存，可随时撤回）",
+            "临时 API Key（会话级）",
             type="password",
             key="tmp_key",
             placeholder="sk-...",
-            help="填在这里只对当前浏览器会话有效：不写入磁盘、不进仓库，刷新页面即失效。"
-            "长期使用请配到 Settings → Secrets。",
+            help="只对当前浏览器会话有效，不落盘、不进仓库。长期使用请配 Settings → Secrets。",
         )
     st.divider()
-    st.caption(
-        "云端配置路径：应用页 `⋮` → `Settings` → `Secrets`，"
-        '内容为 `DEEPSEEK_API_KEY = "sk-..."`，保存后应用会自动重启。'
-    )
+    st.caption("云端配置：应用页 `⋮` → `Settings` → `Secrets`")
+    st.caption('内容：`DEEPSEEK_API_KEY = "sk-..."`')
 
-SAMPLE = "家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！"
+SAMPLE = """家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！
+这款月季包开花，招财辟邪，还能降血压，30天发芽！
+南北方均可种植，浇水就活，新手也能养，所见即所得
+这款月季含7天绿植险，秋季盛花，具体以详情页为准"""
 
 
 def _fill_sample() -> None:
-    """按钮回调里改 session_state 是安全的（此时 widget 还没重新实例化）。"""
-    st.session_state["single_text"] = SAMPLE
-    st.session_state.pop("result", None)
+    st.session_state["bulk_text"] = SAMPLE
+    st.session_state.pop("bulk_result", None)
 
 
-tab_single, tab_batch, tab_rules = st.tabs(["单条校验", "批量体检（不调模型）", "规则库"])
+tab_check, tab_rules = st.tabs(["文案校验", "规则库"])
 
-# ---------- 单条校验 ----------
-with tab_single:
-    left, right = st.columns([3, 2], gap="large")
-
-    with left:
-        text = st.text_area(
-            "口播文案",
-            height=180,
-            placeholder=f"例：{SAMPLE}",
-            key="single_text",
-            label_visibility="collapsed",
-        )
-        col_run, col_sample, col_skip = st.columns([2, 1, 2])
-        run = col_run.button("开始校验", type="primary", use_container_width=True)
-        # 必须用 on_click 回调：脚本跑起来之后不能再改已有 widget 的 session_state，
-        # 直接赋值会抛 StreamlitWidgetAlreadyInstantiatedError。
-        col_sample.button("填入示例", use_container_width=True, on_click=_fill_sample)
-        rule_only = col_skip.checkbox("只做规则体检（不调模型）", value=False)
-
-        if run:
-            if not text.strip():
-                st.warning("请先粘贴一段文案。")
-                st.session_state.pop("result", None)
-            elif rule_only:
-                st.session_state["result"] = {
-                    "text": text.strip(),
-                    "hits": core.lint(text, rules),
-                    "advice": None,
-                    "rewritten": False,
-                }
-            else:
-                key = get_api_key()
-                hits = core.lint(text, rules)
-                if not hits:
-                    # 没命中就不调模型：省钱，也避免模型把合规稿改坏
-                    st.session_state["result"] = {
-                        "text": text.strip(),
-                        "hits": [],
-                        "advice": None,
-                        "rewritten": False,
-                    }
-                elif not key:
-                    st.error(
-                        "未配置 DEEPSEEK_API_KEY。本地请在项目根目录 `.env` 写 "
-                        "`DEEPSEEK_API_KEY=sk-...`；云端请在 Advanced settings → Secrets 里配置。"
-                )
-                    st.session_state["result"] = {
-                        "text": text.strip(),
-                        "hits": hits,
-                        "advice": None,
-                        "rewritten": False,
-                    }
-                else:
-                    with st.spinner("正在调用 DeepSeek 改写……"):
-                        try:
-                            advice = core.rewrite_with_deepseek(text, hits, api_key=key)
-                            st.session_state["result"] = {
-                                "text": text.strip(),
-                                "hits": hits,
-                                "advice": advice,
-                                "rewritten": True,
-                            }
-                        except Exception as exc:  # noqa: BLE001 - 界面统一兜底
-                            st.session_state["result"] = {
-                                "text": text.strip(),
-                                "hits": hits,
-                                "advice": None,
-                                "rewritten": False,
-                            }
-                            msg = str(exc)
-                            if "401" in msg or "Authentication" in msg:
-                                st.error(f"改写失败：API Key 无效或已删除。\n\n`{msg}`")
-                            else:
-                                st.error(f"改写失败：{msg}")
-
-    with right:
-        result = st.session_state.get("result")
-        if result is None:
-            st.info(
-                "**怎么用**\n\n"
-                "1. 左边粘贴口播稿\n"
-                "2. 点「开始校验」\n"
-                "3. 看命中列表，按依据判断\n\n"
-                "命中 0 条时不会调用模型，不产生费用。"
-            )
-            st.divider()
-            st.caption("规则库未覆盖的语义层风险（暗示疗效、贬低同行、虚构产地等）仍需人工确认。")
-        else:
-            hits = result["hits"]
-            m1, m2, m3 = st.columns(3)
-            m1.metric("命中条数", len(hits))
-            m2.metric("最高风险", top_risk(hits))
-            m3.metric("规则总数", len(auto_rules))
-
-            if not hits:
-                st.success("未命中硬规则 ✅")
-                st.caption("规则库未覆盖的语义层风险仍需人工确认。")
-            else:
-                st.markdown("**原稿命中位置**")
-                st.markdown(
-                    '<div style="white-space:pre-wrap;line-height:2;background:#fafafa;'
-                    'border:1px solid #eee;border-radius:8px;padding:12px;font-size:15px;">'
-                    f"{highlight(result['text'], hits)}</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-                for h in hits:
-                    cat = categories.get(h.get("category", ""), "")
-                    cat_note = f" · {h['category']} {cat}" if cat else ""
-                    with st.expander(
-                        f"{RISK_BADGE.get(h['risk'], '⚪')} {h['rule_id']}{cat_note} · {h['risk']} · "
-                        f"命中「{h['matched']}」",
-                        expanded=len(hits) <= 2,
-                    ):
-                        st.markdown(h["reason"])
-                        st.caption(f"依据：{h['source']}")
-                        st.caption(f"上下文：…{h['context']}…")
-
-            if manual_items:
-                with st.expander(f"⚠️ 另有 {len(manual_items)} 条需人工复核（不计入命中数）"):
-                    st.caption(
-                        "这些规则依赖“口播 vs 详情页”的跨源比对，正则判不了。"
-                        "上面显示 0 命中也不代表完全合规，请对照详情页人工确认。"
-                    )
-                    for m in manual_items:
-                        st.markdown(
-                            f"**{m['rule_id']}** · {m['category']} {m['category_name']} · {m['risk']}"
-                        )
-                        st.caption(m["reason"])
-                        st.caption(f"依据：{m['source']}")
-
-    # 改写结果放整行，方便复制
-    result = st.session_state.get("result")
-    if result and result["hits"]:
-        st.divider()
-        if result["rewritten"] and result["advice"]:
-            notes, rewritten = split_advice(result["advice"])
-            st.subheader("DeepSeek 改写建议")
-            c1, c2 = st.columns([3, 2], gap="large")
-            with c1:
-                st.markdown("**逐条说明**")
-                st.markdown(notes or "（模型未给出说明）")
-            with c2:
-                st.markdown("**改写文案（可编辑后复制）**")
-                edited = st.text_area(
-                    "改写文案",
-                    value=rewritten,
-                    height=320,
-                    key="edited_copy",
-                    label_visibility="collapsed",
-                )
-                st.download_button(
-                    "下载改写稿",
-                    data=edited or rewritten,
-                    file_name="改写文案.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-            st.info("AI 辅助建议，规则出处已标注，最终发布前请人工确认。")
-        elif not result["rewritten"]:
-            st.caption("已跳过模型改写：仅展示规则体检结果。")
-
-# ---------- 批量体检 ----------
-with tab_batch:
-    st.markdown("一行一条口播稿，只跑规则、不调模型 —— 适合先把整场脚本筛一遍。")
-    batch = st.text_area(
-        "批量文案",
-        height=220,
-        placeholder="家人们看这棵桂花，四季开花，养死包赔……\n不拍保温棉，冻坏不赔啊\n这款月季含7天绿植险，秋季盛花",
-        key="batch_text",
+# ---------- 文案校验 ----------
+with tab_check:
+    raw = st.text_area(
+        "口播文案（一行一条）",
+        height=210,
+        placeholder=SAMPLE,
+        key="bulk_text",
         label_visibility="collapsed",
     )
-    if st.button("批量体检", type="primary", key="batch_run"):
-        lines = [ln.strip() for ln in batch.splitlines() if ln.strip()]
+
+    c1, c2, c3, c4 = st.columns([2, 1.2, 1.6, 2.2])
+    run = c1.button("开始校验", type="primary", use_container_width=True)
+    c2.button("填入示例", use_container_width=True, on_click=_fill_sample)
+    rule_only = c3.checkbox("只做规则体检（不调模型）", value=False)
+    max_rewrite = c4.slider(
+        "最多改写条数（控制费用）", 1, 20, 6,
+        help="命中违规的文案会各调用一次模型。超出的只做体检，不产生费用。",
+    )
+
+    if run:
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
         if not lines:
             st.warning("请先粘贴文案，一行一条。")
+            st.session_state.pop("bulk_result", None)
         else:
-            rows = []
+            key = get_api_key()
+            items = []
             for idx, line in enumerate(lines, 1):
                 hits = core.lint(line, rules)
-                rows.append(
-                    {
-                        "序号": idx,
-                        "文案": line,
-                        "命中数": len(hits),
-                        "最高风险": top_risk(hits),
-                        "命中规则": "、".join(f"{h['rule_id']}({h['matched']})" for h in hits) or "—",
-                    }
+                items.append(
+                    {"idx": idx, "text": line, "hits": hits, "advice": None, "rewritten": False, "error": None}
                 )
-            risky = sum(1 for r in rows if r["命中数"])
-            st.success(f"共 {len(rows)} 条，{risky} 条命中硬规则。")
-            st.dataframe(
-                rows,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "序号": st.column_config.NumberColumn(width="small"),
-                    "文案": st.column_config.TextColumn(width="large"),
-                    "命中数": st.column_config.NumberColumn(width="small"),
-                },
+
+            todo = [it for it in items if it["hits"]] if not rule_only else []
+            if rule_only:
+                st.session_state["bulk_result"] = {
+                    "items": items,
+                    "rule_only": True,
+                    "skipped_rewrite": len([i for i in items if i["hits"]]),
+                    "key_missing": False,
+                }
+            elif not todo:
+                st.session_state["bulk_result"] = {
+                    "items": items, "rule_only": False, "skipped_rewrite": 0, "key_missing": False
+                }
+            elif not key:
+                st.session_state["bulk_result"] = {
+                    "items": items, "rule_only": False, "skipped_rewrite": len(todo), "key_missing": True
+                }
+            else:
+                batch = todo[:max_rewrite]
+                skipped = len(todo) - len(batch)
+                progress = st.progress(0.0, text=f"正在并行改写 0/{len(batch)} 条…")
+
+                def _work(item: dict) -> str:
+                    return core.rewrite_with_deepseek(
+                        item["text"], item["hits"], api_key=key, replacements=replacements
+                    )
+
+                done = 0
+                with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
+                    futures = {pool.submit(_work, it): it for it in batch}
+                    for fut in as_completed(futures):
+                        item = futures[fut]
+                        try:
+                            item["advice"] = fut.result()
+                            item["rewritten"] = True
+                        except Exception as exc:  # noqa: BLE001
+                            item["error"] = str(exc)
+                        done += 1
+                        progress.progress(done / len(batch), text=f"正在并行改写 {done}/{len(batch)} 条…")
+                progress.empty()
+
+                st.session_state["bulk_result"] = {
+                    "items": items,
+                    "rule_only": False,
+                    "skipped_rewrite": skipped,
+                    "key_missing": False,
+                }
+
+    result = st.session_state.get("bulk_result")
+
+    if result:
+        items = result["items"]
+        total_hits = sum(len(i["hits"]) for i in items)
+        risky = [i for i in items if i["hits"]]
+        rewritten = [i for i in items if i["rewritten"]]
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("文案条数", len(items))
+        m2.metric("命中条数", total_hits)
+        m3.metric("需处理", len(risky))
+        _order = {"极高": 0, "高": 1, "中": 2, "低": 3, "无": 4}
+        worst = min((top_risk(i["hits"]) for i in items), key=lambda r: _order.get(r, 9), default="无")
+        m4.metric("最高风险", worst)
+
+        if result["key_missing"]:
+            st.error(
+                "未配置 DEEPSEEK_API_KEY：右侧栏可临时填写，或在 Settings → Secrets 配置。"
+                "当前仅完成规则体检。"
             )
+        elif result["rule_only"]:
+            st.caption(f"只做规则体检，跳过 {result['skipped_rewrite']} 条命中文案的模型改写。")
+        if result.get("skipped_rewrite") and not result["key_missing"] and not result["rule_only"]:
+            st.warning(f"有 {result['skipped_rewrite']} 条超出改写上限，只做了体检。调高滑块可继续。")
+
+        if not risky:
+            st.success("全部文案未命中硬规则 ✅ — 语义层风险仍需人工确认。")
+        else:
+            if rewritten:
+                bundle = "\n\n".join(
+                    f"#{i['idx']} 原文：{i['text']}\n改写：{split_advice(i['advice'])[1]}"
+                    for i in rewritten
+                )
+                st.download_button(
+                    "下载全部改写稿",
+                    data=bundle,
+                    file_name="改写文案.txt",
+                    mime="text/plain",
+                )
+
+            st.markdown("### 逐条结果")
+            for item in items:
+                hits = item["hits"]
+                if not hits:
+                    with st.container(border=True):
+                        st.markdown(
+                            f'<div class="hm-item-head"><span class="hm-idx">{item["idx"]}</span>'
+                            f'<span class="hm-tag">未命中</span></div>'
+                            f'<div class="hm-orig">{html.escape(item["text"])}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    continue
+
+                risk = top_risk(hits)
+                cats = sorted({h.get("category", "") for h in hits if h.get("category")})
+                cat_txt = " · ".join(f"{c} {categories.get(c, '')}" for c in cats)
+                with st.container(border=True):
+                    st.markdown(
+                        f'<div class="hm-item-head">'
+                        f'<span class="hm-idx">{item["idx"]}</span>'
+                        f'<span class="hm-risk {RISK_CLASS.get(risk, "hm-risk-d")}">{RISK_BADGE.get(risk, "")} {risk}</span>'
+                        f'<span class="hm-tag">{len(hits)} 处命中</span>'
+                        f'<span class="hm-tag">{html.escape(cat_txt)}</span>'
+                        + (
+                            '<span class="hm-tag" style="background:#e8f5ec;color:#1f6b39;border-color:#cfe8d8">已改写</span>'
+                            if item["rewritten"]
+                            else ""
+                        )
+                        + f'</div><div class="hm-orig">{highlight(item["text"], hits)}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    with st.expander("查看命中明细与依据"):
+                        for h in hits:
+                            cat = categories.get(h.get("category", ""), "")
+                            st.markdown(
+                                f"**{h['rule_id']}** · {h['category']} {cat} · {h['risk']} · "
+                                f"命中「{h['matched']}」"
+                            )
+                            st.markdown(h["reason"])
+                            st.caption(f"依据：{h['source']}")
+                            st.divider()
+
+                    if item["rewritten"] and item["advice"]:
+                        notes, rewritten_text = split_advice(item["advice"])
+                        st.markdown("**合规改写**")
+                        st.code(rewritten_text or "（模型未给出改写文案）", language=None, wrap_lines=True)
+                        if notes:
+                            with st.expander("查看逐条说明"):
+                                st.markdown(notes)
+                    elif item["error"]:
+                        st.error(f"改写失败：{item['error'][:200]}")
+                    else:
+                        st.caption("未改写（超出上限或只做体检）")
+
+        if manual_items:
+            with st.expander(f"⚠️ 另有 {len(manual_items)} 条需人工复核（不计入命中数）"):
+                st.caption(
+                    "这些规则依赖“口播 vs 详情页”的跨源比对，正则判不了。"
+                    "即使显示 0 命中，也不代表完全合规。"
+                )
+                for m in manual_items:
+                    st.markdown(f"**{m['rule_id']}** · {m['category']} {m['category_name']} · {m['risk']}")
+                    st.caption(m["reason"])
+                    st.caption(f"依据：{m['source']}")
 
 # ---------- 规则库 ----------
 with tab_rules:
-    st.caption("改规则请直接编辑 rules.json / replacements.json，刷新页面即生效。")
+    st.caption("改规则直接编辑 rules.json / replacements.json，刷新页面即生效。")
     for code, name in categories.items():
         group = [r for r in rules if r["category"] == code]
         if not group:
             continue
         st.markdown(f"#### {code} · {name}（{len(group)} 条）")
         for r in group:
-            if r["manual_review"]:
-                tag = "需人工复核"
-                body = f"**{tag}** · {r['reason']}"
-            else:
-                tag = f"`{r['regex'].pattern}`"
-                body = r["reason"]
-            with st.expander(f"{RISK_BADGE.get(r['risk'], '⚪')} {r['id']} · {r['risk']} · {tag}"):
-                st.markdown(body)
+            tag = "需人工复核" if r["manual_review"] else f"`{r['regex'].pattern}`"
+            with st.expander(
+                f"{RISK_BADGE.get(r['risk'], '⚪')} {r['id']} · {r['risk']} · {tag}"
+            ):
+                st.markdown(r["reason"])
                 st.caption(f"依据：{r['source']}")
+
     st.divider()
     st.markdown("**替换表分组**")
-    st.write("、".join(f"`{k}`（{len(v)} 条）" for k, v in replacements.items()))
+    st.write("、".join(f"`{k}`（{len(v)} 条）" for k, v in replacements.items() if isinstance(v, dict)))
