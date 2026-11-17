@@ -24,16 +24,16 @@ def load() -> tuple[list[dict], dict, dict]:
         data = json.load(f)
     with open(os.path.join(BASE_DIR, "replacements.json"), encoding="utf-8-sig") as f:
         replacements = json.load(f)
-    return data["rules"], replacements, data.get("categories", {})
+    return data["rules"], replacements, data.get("categories", {}), data.get("platforms", {})
 
 
 def main() -> None:
-    rules, replacements, categories = load()
+    rules, replacements, categories, platforms = load()
     manual = [r for r in rules if r.get("manual_review")]
 
     # 只挑规则必需的字段；manual_review 的规则没有可执行正则，不进前端匹配
     slim_rules = [
-        {k: r.get(k, "") for k in ("id", "category", "pattern", "risk", "reason", "source")}
+        {k: r.get(k, "") for k in ("id", "category", "platform", "pattern", "risk", "reason", "source")}
         for r in rules
         if not r.get("manual_review")
     ]
@@ -49,7 +49,7 @@ def main() -> None:
     }
 
     payload = json.dumps(
-        {"rules": slim_rules, "categories": categories, "replacements": groups},
+        {"rules": slim_rules, "categories": categories, "platforms": platforms, "replacements": groups},
         ensure_ascii=False,
     )
     # </script> 出现在 JSON 里会提前闭合脚本块
@@ -131,6 +131,7 @@ TEMPLATE = r"""<!DOCTYPE html>
       <button class="primary" id="run">开始体检</button>
       <button class="ghost" id="demo">填入示例</button>
       <button class="ghost" id="clear">清空</button>
+      <select id="plat" title="校验平台" style="margin-left:auto;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;font:inherit;color:inherit"></select>
     </div>
   </div>
 
@@ -153,9 +154,17 @@ const SAMPLE = "家人们看这棵桂花，四季开花，养死包赔，全网�
 const RULES = DATA.rules.map((r,i)=>({...r, re:new RegExp(r.pattern,"g"), idx:i}))
   .sort((a,b)=>(RISK_ORDER[a.risk]??9)-(RISK_ORDER[b.risk]??9) || a.idx-b.idx);
 
+let PLATFORM="all";
+function activeRules(){
+  return RULES.filter(r=>{
+    const ps = r.platform && r.platform.length ? r.platform : ["all"];
+    return PLATFORM==="all" ? ps.includes("all") : (ps.includes("all")||ps.includes(PLATFORM));
+  });
+}
+
 function lint(text){
   const hits=[];
-  for(const rule of RULES){
+  for(const rule of activeRules()){
     rule.re.lastIndex=0;
     let m;
     while((m=rule.re.exec(text))!==null){
@@ -227,7 +236,7 @@ function render(text){
   out.innerHTML=`<div class="stats">
       <div class="stat"><b>${hits.length}</b><span>命中条数</span></div>
       <div class="stat"><b>${top}</b><span>最高风险</span></div>
-      <div class="stat"><b>${RULES.length}</b><span>规则总数</span></div>
+      <div class="stat"><b>${activeRules().length}</b><span>生效规则</span></div>
     </div>
     <div class="verdict bad">发现 ${hits.length} 处可能违规，发布前请逐条核对。</div>
     <div class="card" style="margin-top:16px"><div class="copy">${highlight(text,hits)}</div></div>
@@ -247,6 +256,13 @@ document.getElementById("clear").onclick=()=>{
   document.getElementById("txt").value=""; document.getElementById("out").innerHTML="";
   document.getElementById("txt").focus();
 };
+const platSel=document.getElementById("plat");
+for(const [code,name] of Object.entries(DATA.platforms||{})){
+  const o=document.createElement("option"); o.value=code; o.textContent=name; platSel.appendChild(o);
+}
+platSel.value="all";
+platSel.onchange=()=>{ PLATFORM=platSel.value; const t=document.getElementById("txt").value; render(t); };
+
 document.getElementById("txt").addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==="Enter") document.getElementById("run").click();
 });

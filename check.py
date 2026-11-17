@@ -146,6 +146,8 @@ def _compile_rule(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": rid,
         "category": str(item.get("category") or ""),
+        # platform：["all"] 是三平台通用底座，["taobao"]/["pdd"]/["jd"] 是平台差异层
+        "platform": tuple(item.get("platform") or ("all",)),
         "risk": str(item.get("risk") or "中"),
         "reason": str(item.get("reason") or ""),
         "source": str(item.get("source") or ""),
@@ -155,6 +157,20 @@ def _compile_rule(item: dict[str, Any]) -> dict[str, Any]:
         # 可选扩展：命中处前后若出现这些词，则忽略该次命中（用来压误报）
         "exclude": tuple(item.get("exclude") or ()),
     }
+
+
+def load_platforms(path: str = RULES_PATH) -> dict[str, str]:
+    """平台编号 -> 名称，例如 {"all": "三平台通用", "taobao": "淘宝"}。"""
+    data = _read_json(path)
+    return {str(k): str(v) for k, v in (data.get("platforms") or {}).items()}
+
+
+def rule_applies(rule: dict[str, Any], platform: str) -> bool:
+    """某条规则是否适用于指定平台。platform="all" 时只取通用底座。"""
+    scopes = rule["platform"]
+    if platform in ("", "all"):
+        return "all" in scopes
+    return "all" in scopes or platform in scopes
 
 
 def load_categories(path: str = RULES_PATH) -> dict[str, str]:
@@ -239,9 +255,11 @@ def lint(
     text: str,
     rules: list[dict[str, Any]] | None = None,
     replacements: dict[str, dict[str, str]] | None = None,
+    platform: str = "all",
 ) -> list[dict[str, Any]]:
     """扫一遍硬规则，返回命中列表（同一位置只报一次，按风险与位置排序）。
 
+    platform="all" 只跑三平台通用底座；指定 taobao/pdd/jd 时加上该平台的差异层规则。
     传了 replacements 时，每条命中会附带 suggestion（推荐修改文案）。
     """
     rules = rules if rules is not None else load_rules()
@@ -252,6 +270,8 @@ def lint(
     for rule in rules:
         if rule["manual_review"]:
             # 跨源比对类规则（口播 vs 详情页）无法用正则判定，只进人工清单
+            continue
+        if not rule_applies(rule, platform):
             continue
         for m in rule["regex"].finditer(text):
             # group(0) 才是完整命中（如“冻坏不赔”），不是第一个捕获组
@@ -292,6 +312,7 @@ def lint(
 def manual_review_items(
     rules: list[dict[str, Any]] | None = None,
     categories: dict[str, str] | None = None,
+    platform: str = "all",
 ) -> list[dict[str, Any]]:
     """manual_review 规则的清单：正则判不了，只能人工看，**不计入命中**。
 
@@ -311,7 +332,7 @@ def manual_review_items(
             "source": r["source"],
         }
         for r in rules
-        if r["manual_review"]
+        if r["manual_review"] and rule_applies(r, platform)
     ]
 
 
@@ -452,10 +473,11 @@ def check(
     api_key: str | None = None,
     rules: list[dict[str, Any]] | None = None,
     replacements: dict[str, dict[str, str]] | None = None,
+    platform: str = "all",
 ) -> dict[str, Any]:
     """检查并（可选）改写一条文案。
 
-    返回 {"text", "hits", "advice", "rewritten"}；未命中规则时 advice 为 None、rewritten False。
+    platform 决定跑哪些规则：all 只跑通用底座，taobao/pdd/jd 额外叠加该平台差异层。
     """
     text = (text or "").strip()
     if not text:
@@ -463,12 +485,13 @@ def check(
 
     rules = rules if rules is not None else load_rules()
     replacements = replacements if replacements is not None else load_replacements()
-    hits = lint(text, rules, replacements)
+    hits = lint(text, rules, replacements, platform)
 
     result: dict[str, Any] = {
         "text": text,
+        "platform": platform,
         "hits": hits,
-        "manual_review": manual_review_items(rules),
+        "manual_review": manual_review_items(rules, platform=platform),
         "advice": None,
         "rewritten": False,
     }
@@ -483,6 +506,9 @@ def check(
 def _print_human(result: dict[str, Any]) -> None:
     categories = load_categories()
     print("=" * 56)
+    platforms = load_platforms()
+    pcode = result.get("platform", "all")
+    print(f"平台：{platforms.get(pcode, pcode)}")
     print("原文案：")
     print(result["text"])
     print(f"\n硬规则命中：{len(result['hits'])} 条")
@@ -626,6 +652,28 @@ def _selftest() -> int:
     failures += 0 if ok else 1
     print(f"{'PASS' if ok else 'FAIL'}  替换表没有的说法不给建议（不编造）")
 
+    # 平台差异层：通用底座 + 平台叠加，互不污染
+    probe = "这个品种实际不存在，我们活体种苗不退不换，品种不符"
+    got = {
+        p: [h["rule_id"] for h in lint(probe, rules, replacements, p)]
+        for p in ("all", "taobao", "pdd", "jd")
+    }
+    ok = (
+        got["all"] == []
+        and "T001" in got["taobao"] and "P001" not in got["taobao"]
+        and "P001" in got["pdd"] and "T001" not in got["pdd"]
+        and "J001" in got["jd"]
+    )
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  平台差异层互不污染  实际 {got}")
+
+    # 平台规则不能漏进 all：all 只跑通用底座
+    ok = len([r for r in rules if rule_applies(r, "all")]) == len(
+        [r for r in rules if "all" in r["platform"]]
+    )
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  all 只取通用底座")
+
     # exclude 扩展：命中但含豁免词时不报
     custom = [{"id": "T1", "pattern": "第一", "risk": "高", "reason": "-", "source": "-", "exclude": ["第一次"]}]
     ok = lint("第一次养花", custom) == [] and len(lint("全网第一", custom)) == 1
@@ -640,12 +688,21 @@ def _main(argv: list[str]) -> int:
     rewrite = "--no-ai" not in argv
     as_json = "--json" in argv
     file_path: str | None = None
+    platform = "all"
     words: list[str] = []
 
     i = 0
     while i < len(argv):
         token = argv[i]
         if token in ("--no-ai", "--json"):
+            i += 1
+            continue
+        if token == "--platform" and i + 1 < len(argv):
+            platform = argv[i + 1].strip().lower()
+            i += 2
+            continue
+        if token.startswith("--platform="):
+            platform = token.split("=", 1)[1].strip().lower()
             i += 1
             continue
         if token == "--file" and i + 1 < len(argv):
@@ -660,6 +717,10 @@ def _main(argv: list[str]) -> int:
             words.append(token)
         i += 1
 
+    if platform not in load_platforms():
+        print(f"未知平台：{platform}，可选 {list(load_platforms())}", file=sys.stderr)
+        return 2
+
     texts: list[str] = []
     if file_path:
         if not os.path.isfile(file_path):
@@ -673,7 +734,8 @@ def _main(argv: list[str]) -> int:
 
     if not texts:
         print(
-            '用法：python check.py "家人们看这棵桂花，四季开花，养死包赔……" [--no-ai] [--json] [--file 稿件.txt]',
+            '用法：python check.py "家人们看这棵桂花，四季开花，养死包赔……"\n'
+            "      [--platform all|taobao|pdd|jd] [--no-ai] [--json] [--file 稿件.txt]",
             file=sys.stderr,
         )
         return 2
@@ -681,7 +743,7 @@ def _main(argv: list[str]) -> int:
     results = []
     for text in texts:
         try:
-            results.append(check(text, rewrite=rewrite))
+            results.append(check(text, rewrite=rewrite, platform=platform))
         except Exception as exc:  # noqa: BLE001 - CLI 入口统一兜底
             print(f"失败：{exc}", file=sys.stderr)
             return 1

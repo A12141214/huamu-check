@@ -38,8 +38,9 @@ def run(use_ai: bool) -> int:
     at = AppTest.from_file("app.py", default_timeout=120).run()
     report("首屏无异常", not at.exception, _text_of(at.exception))
     body = _text_of(at.markdown)
-    report("标题渲染（渐变 Hero）", "花木口播文案合规校验" in body)
+    report("标题渲染（渐变 Hero）", "花木文案合规校验" in body)
     report("两个标签页", len(at.tabs) == 2, f"实际 {len(at.tabs)}")
+    report("平台选择器存在", len(at.segmented_control) >= 1, f"实际 {len(at.segmented_control)}")
 
     # --- 2. 空输入 ---
     at.button[0].click().run()
@@ -102,6 +103,24 @@ def run(use_ai: bool) -> int:
     report("改写路径无异常", not at.exception, _text_of(at.exception))
     body = _text_of(at.markdown) + _text_of(at.code)
     report("出现合规改写区块", "合规改写" in body or "7天绿植险" in body, body[:120])
+
+    # --- 7. 平台差异层：同一句话在通用/淘宝下结果不同 ---
+    probe = "这个品种实际不存在，我们活体种苗不退不换"
+    at = AppTest.from_file("app.py", default_timeout=120).run()
+    at.text_area(key="bulk_text").set_value(probe).run()
+    at.checkbox[0].set_value(True).run()
+    at.button[0].click().run()
+    all_hits = str(at.metric[1].value) if len(at.metric) > 1 else "?"
+
+    at = AppTest.from_file("app.py", default_timeout=120).run()
+    at.segmented_control[0].set_value("淘宝").run()
+    at.text_area(key="bulk_text").set_value(probe).run()
+    at.checkbox[0].set_value(True).run()
+    at.button[0].click().run()
+    tb_hits = str(at.metric[1].value) if len(at.metric) > 1 else "?"
+
+    report(f"平台差异层生效（通用 {all_hits} 命中 / 淘宝 {tb_hits} 命中）",
+           all_hits == "0" and tb_hits == "1", f"all={all_hits} taobao={tb_hits}")
 
     print(f"\n界面自检：{'全部通过' if failures == 0 else f'{failures} 项失败'}")
     return 0 if failures == 0 else 1

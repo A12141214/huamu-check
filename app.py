@@ -190,24 +190,39 @@ def top_risk(hits: list[dict]) -> str:
 rules = load_rules()
 replacements = load_replacements()
 categories = core.load_categories()
+platforms = core.load_platforms()
 auto_rules = [r for r in rules if not r["manual_review"]]
-manual_items = core.manual_review_items(rules, categories)
+universal = [r for r in auto_rules if "all" in r["platform"]]
+platform_only = [r for r in auto_rules if "all" not in r["platform"]]
 
 st.markdown(
     f"""
 <div class="hm-hero">
-  <h1>🌿 花木口播文案合规校验</h1>
-  <p>粘贴整场脚本，一行一条 —— 自动标红违规说法、给出官方依据、生成合规改写</p>
+  <h1>🌿 花木文案合规校验</h1>
+  <p>淘宝 / 拼多多 / 京东三平台 —— 通用底座 + 平台差异层，一行一条粘贴整场脚本</p>
   <div class="hm-chips">
-    <span class="hm-chip">{len(auto_rules)} 条硬规则</span>
+    <span class="hm-chip">{len(universal)} 条通用规则</span>
+    <span class="hm-chip">{len(platform_only)} 条平台专属</span>
     <span class="hm-chip">{len(categories)} 个类别</span>
-    <span class="hm-chip">{len(manual_items)} 条人工复核</span>
     <span class="hm-chip">未命中不调用模型 · 不计费</span>
   </div>
 </div>
 """,
     unsafe_allow_html=True,
 )
+
+# 平台选择：all = 通用底座，其余叠加该平台的差异层规则
+_pname_to_code = {v: k for k, v in platforms.items()}
+_choice = st.segmented_control(
+    "校验平台",
+    list(platforms.values()),
+    default=platforms.get("all", "三平台通用"),
+    label_visibility="collapsed",
+    key="platform_choice",
+)
+platform = _pname_to_code.get(_choice or "", "all")
+manual_items = core.manual_review_items(rules, categories, platform)
+active_rules = [r for r in auto_rules if core.rule_applies(r, platform)]
 
 with st.sidebar:
     st.markdown("#### 配置自检")
@@ -279,7 +294,7 @@ with tab_check:
             key = get_api_key()
             items = []
             for idx, line in enumerate(lines, 1):
-                hits = core.lint(line, rules, replacements)
+                hits = core.lint(line, rules, replacements, platform)
                 items.append(
                     {"idx": idx, "text": line, "hits": hits, "advice": None, "rewritten": False, "error": None}
                 )
@@ -455,16 +470,25 @@ with tab_check:
 
 # ---------- 规则库 ----------
 with tab_rules:
-    st.caption("改规则直接编辑 rules.json / replacements.json，刷新页面即生效。")
+    st.caption(
+        f"当前平台：**{platforms.get(platform, platform)}** —— 共 {len(active_rules)} 条规则生效"
+        f"（通用底座 {len(universal)} 条 + 平台专属 {len([r for r in active_rules if 'all' not in r['platform']])} 条）。"
+        "改规则直接编辑 rules.json / replacements.json，刷新页面即生效。"
+    )
     for code, name in categories.items():
-        group = [r for r in rules if r["category"] == code]
+        group = [r for r in rules if r["category"] == code and core.rule_applies(r, platform)]
         if not group:
             continue
         st.markdown(f"#### {code} · {name}（{len(group)} 条）")
         for r in group:
-            tag = "需人工复核" if r["manual_review"] else f"`{r['regex'].pattern}`"
+            if r["manual_review"]:
+                tag = "需人工复核"
+            else:
+                tag = f"`{r['regex'].pattern}`"
+            scope = "通用" if "all" in r["platform"] else platforms.get(r["platform"][0], "")
+            scope_tag = "" if scope == "通用" else f" · 🔖{scope}"
             with st.expander(
-                f"{RISK_BADGE.get(r['risk'], '⚪')} {r['id']} · {r['risk']} · {tag}"
+                f"{RISK_BADGE.get(r['risk'], '⚪')} {r['id']}{scope_tag} · {r['risk']} · {tag}"
             ):
                 st.markdown(r["reason"])
                 st.caption(f"依据：{r['source']}")
