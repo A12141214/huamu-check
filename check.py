@@ -466,6 +466,64 @@ def rewrite_with_deepseek(
 
 
 # ========== 5. 主流程 ==========
+def compare_platforms(
+    text: str,
+    platforms: list[str] | None = None,
+    *,
+    rules: list[dict[str, Any]] | None = None,
+    replacements: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """同一段文案分别按多个平台跑一遍，给出「通用底座 + 各自专属」的对比。
+
+    卖家常常一条文案发三个平台，这个函数就是回答“到底哪个平台会多拦几条、多拦哪些”。
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("文案不能为空")
+
+    rules = rules if rules is not None else load_rules()
+    replacements = replacements if replacements is not None else load_replacements()
+    names = load_platforms()
+
+    base = lint(text, rules, replacements, "all")
+    base_keys = {(h["rule_id"], h["start"], h["end"]) for h in base}
+
+    codes = platforms or [c for c in names if c != "all"]
+    result: dict[str, Any] = {
+        "text": text,
+        "base": [{k: h[k] for k in ("rule_id", "risk", "matched", "category")} for h in base],
+        "platforms": {},
+    }
+    for code in codes:
+        hits = lint(text, rules, replacements, code)
+        extra = [
+            {k: h[k] for k in ("rule_id", "risk", "matched", "category")}
+            for h in hits
+            if (h["rule_id"], h["start"], h["end"]) not in base_keys
+        ]
+        result["platforms"][code] = {
+            "name": names.get(code, code),
+            "total": len(hits),
+            "extra": extra,
+        }
+    return result
+
+
+def _print_compare(cmp: dict[str, Any]) -> None:
+    print("=" * 56)
+    print("平台对比（同一段文案）")
+    print(cmp["text"])
+    base = cmp["base"]
+    base_txt = "、".join(f"{h['rule_id']} {h['matched']}" for h in base) or "无"
+    print(f"\n  通用底座：{len(base)} 条 → {base_txt}")
+    for code, info in cmp["platforms"].items():
+        if info["extra"]:
+            extra_txt = "、".join(f"{h['rule_id']} {h['matched']}" for h in info["extra"])
+        else:
+            extra_txt = "无"
+        print(f"  {info['name']}：共 {info['total']} 条（专属 +{len(info['extra'])}）→ {extra_txt}")
+
+
 def check(
     text: str,
     *,
@@ -674,6 +732,19 @@ def _selftest() -> int:
     failures += 0 if ok else 1
     print(f"{'PASS' if ok else 'FAIL'}  all 只取通用底座")
 
+    # 一条文案跑三平台：对比视图只把「专属新增」列出来，通用部分不重复
+    cmp = compare_platforms("养死包赔，这个品种实际不存在", ["taobao", "pdd", "jd"], rules=rules, replacements=replacements)
+    ok = (
+        [h["rule_id"] for h in cmp["base"]] == ["R001"]
+        and [h["rule_id"] for h in cmp["platforms"]["taobao"]["extra"]] == ["T001"]
+        and cmp["platforms"]["pdd"]["extra"] == []
+        and cmp["platforms"]["jd"]["extra"] == []
+    )
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  三平台对比只列专属新增  实际 "
+          f"base={[h['rule_id'] for h in cmp['base']]} "
+          f"tb={[h['rule_id'] for h in cmp['platforms']['taobao']['extra']]}")
+
     # exclude 扩展：命中但含豁免词时不报
     custom = [{"id": "T1", "pattern": "第一", "risk": "高", "reason": "-", "source": "-", "exclude": ["第一次"]}]
     ok = lint("第一次养花", custom) == [] and len(lint("全网第一", custom)) == 1
@@ -689,12 +760,21 @@ def _main(argv: list[str]) -> int:
     as_json = "--json" in argv
     file_path: str | None = None
     platform = "all"
+    compare_list: list[str] = []
     words: list[str] = []
 
     i = 0
     while i < len(argv):
         token = argv[i]
         if token in ("--no-ai", "--json"):
+            i += 1
+            continue
+        if token == "--platforms" and i + 1 < len(argv):
+            compare_list = [p.strip().lower() for p in argv[i + 1].split(",") if p.strip()]
+            i += 2
+            continue
+        if token.startswith("--platforms="):
+            compare_list = [p.strip().lower() for p in token.split("=", 1)[1].split(",") if p.strip()]
             i += 1
             continue
         if token == "--platform" and i + 1 < len(argv):
@@ -735,10 +815,23 @@ def _main(argv: list[str]) -> int:
     if not texts:
         print(
             '用法：python check.py "家人们看这棵桂花，四季开花，养死包赔……"\n'
-            "      [--platform all|taobao|pdd|jd] [--no-ai] [--json] [--file 稿件.txt]",
+            "      [--platform all|taobao|pdd|jd] [--platforms taobao,pdd,jd] [--no-ai] [--json] [--file 稿件.txt]",
             file=sys.stderr,
         )
         return 2
+
+    # 一条文案跑多个平台，输出「通用 + 各自专属」的对比
+    if compare_list:
+        cmp_results = [compare_platforms(t, compare_list) for t in texts]
+        if as_json:
+            payload = cmp_results if len(cmp_results) > 1 else cmp_results[0]
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            for idx, cmp in enumerate(cmp_results):
+                if idx:
+                    print()
+                _print_compare(cmp)
+        return 0
 
     results = []
     for text in texts:

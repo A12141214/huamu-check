@@ -233,6 +233,20 @@ python check.py "文案" --platform taobao
 python check.py --file 稿件.txt --platform pdd --no-ai
 ```
 
+**一条文案发三个平台**时用 `--platforms`，直接给对比结果（通用部分不重复列，只标各平台多出来的）：
+
+```powershell
+python check.py "这个品种实际不存在，我们活体种苗不退不换" --platforms taobao,pdd,jd
+```
+
+```
+平台对比（同一段文案）
+  通用底座：0 条 → 无
+  淘宝：共 1 条（专属 +1）→ T001 实际不存在
+  拼多多：共 1 条（专属 +1）→ P001 活体种苗不退不换
+  京东：共 0 条（专属 +0）→ 无
+```
+
 界面顶部有平台切换（通用 / 淘宝 / 拼多多 / 京东），切换后规则总数、命中结果、
 规则库列表都会跟着变。
 
