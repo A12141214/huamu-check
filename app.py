@@ -82,6 +82,15 @@ st.markdown(
   }
   mark{background:#ffe0e0; color:#9c1010; padding:0 3px; border-radius:4px; font-weight:600;}
 
+  .hm-sug-block{
+    margin-top:10px; background:#f2f9f3; border:1px solid #d9ecdd; border-left:3px solid #2f9e56;
+    border-radius:10px; padding:11px 14px; font-size:14px; line-height:1.9;
+  }
+  .hm-sug-title{font-size:12.5px; color:#3d6b4a; font-weight:700; margin-bottom:4px; letter-spacing:.5px;}
+  .hm-sug-row{color:#2c3d31;}
+  .hm-sug-row .from{color:#a31616; text-decoration:line-through; text-decoration-thickness:1px;}
+  .hm-sug-row .to{color:#1f6b39; font-weight:600;}
+
   div[data-testid="stMetric"]{
     background:var(--hm-card); border:1px solid var(--hm-line); border-radius:14px;
     padding:14px 16px; box-shadow:0 1px 2px rgba(16,24,18,.04);
@@ -270,7 +279,7 @@ with tab_check:
             key = get_api_key()
             items = []
             for idx, line in enumerate(lines, 1):
-                hits = core.lint(line, rules)
+                hits = core.lint(line, rules, replacements)
                 items.append(
                     {"idx": idx, "text": line, "hits": hits, "advice": None, "rewritten": False, "error": None}
                 )
@@ -395,6 +404,19 @@ with tab_check:
                         unsafe_allow_html=True,
                     )
 
+                    # 推荐修改文案：按替换表直接给，不依赖模型，秒出
+                    sugg = [(h["matched"], h["suggestion"]) for h in hits if h.get("suggestion")]
+                    if sugg:
+                        rows = "".join(
+                            f'<div class="hm-sug-row">{html.escape(src)} → '
+                            f'<span class="to">{html.escape(dst)}</span></div>'
+                            for src, dst in sugg
+                        )
+                        st.markdown(
+                            f'<div class="hm-sug-block"><div class="hm-sug-title">推荐修改文案</div>{rows}</div>',
+                            unsafe_allow_html=True,
+                        )
+
                     with st.expander("查看命中明细与依据"):
                         for h in hits:
                             cat = categories.get(h.get("category", ""), "")
@@ -403,6 +425,8 @@ with tab_check:
                                 f"命中「{h['matched']}」"
                             )
                             st.markdown(h["reason"])
+                            if h.get("suggestion"):
+                                st.success(f"建议改为：{h['suggestion']}")
                             st.caption(f"依据：{h['source']}")
                             st.divider()
 

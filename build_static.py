@@ -39,7 +39,11 @@ def main() -> None:
     ]
     # 去掉 _note 这类非映射字段（顶层说明是字符串，不是分组）
     groups = {
-        k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")}
+        k: {
+            kk: re.sub(r"\{[^}]{1,20}\}", "详情页标注的信息", vv)
+            for kk, vv in v.items()
+            if not kk.startswith("_")
+        }
         for k, v in replacements.items()
         if isinstance(v, dict)
     }

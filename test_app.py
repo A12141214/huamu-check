@@ -62,6 +62,7 @@ def run(use_ai: bool) -> int:
         f"metrics={metrics}",
     )
     report("出现逐条结果", "逐条结果" in _text_of(at.markdown))
+    report("出现推荐修改文案", "推荐修改文案" in _text_of(at.markdown))
     report("只体检时提示跳过改写", any("跳过" in str(c.value) for c in at.caption))
 
     # --- 4. 全合规 ---

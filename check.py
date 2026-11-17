@@ -187,8 +187,63 @@ def _snippet(text: str, start: int, end: int, width: int = 10) -> str:
     return f"{left}【{text[start:end]}】{right}"
 
 
-def lint(text: str, rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """扫一遍硬规则，返回命中列表（同一位置只报一次，按风险与位置排序）。"""
+PLACEHOLDER_FILL = {
+    "{品种真实花期}": "详情页标注的花期",
+    "{品种真实挂果期}": "详情页标注的挂果期",
+}
+
+
+def fill_placeholders(text: str) -> str:
+    """替换表里的占位符是给模型看的，直接展示给店员时要有可读的说法。"""
+    for key, val in PLACEHOLDER_FILL.items():
+        text = text.replace(key, val)
+    return re.sub(r"\{[^}]{1,20}\}", "详情页标注的信息", text)
+
+
+def suggest_replacement(
+    matched: str,
+    replacements: dict[str, dict[str, str]] | None = None,
+    category: str = "",
+) -> str | None:
+    """给一个命中片段找出推荐修改文案。
+
+    先精确匹配替换表的键，再退化为包含匹配（取最长的键，避免“包活”盖过“包成活”）。
+    优先在本类别对应的分组里找，找不到再扫其它分组。返回前把占位符换成可读说法。
+    """
+    replacements = replacements if replacements is not None else load_replacements()
+    group = group_name_for(category) if category else ""
+
+    ordered: list[dict[str, str]] = []
+    if group and isinstance(replacements.get(group), dict):
+        ordered.append(replacements[group])
+    ordered += [
+        v for k, v in replacements.items() if isinstance(v, dict) and k != group
+    ]
+
+    for grp in ordered:
+        if matched in grp:
+            return fill_placeholders(grp[matched])
+
+    best: tuple[str, str] | None = None
+    for grp in ordered:
+        for key, val in grp.items():
+            if len(key) < 2:
+                continue
+            if key in matched or matched in key:
+                if best is None or len(key) > len(best[0]):
+                    best = (key, val)
+    return fill_placeholders(best[1]) if best else None
+
+
+def lint(
+    text: str,
+    rules: list[dict[str, Any]] | None = None,
+    replacements: dict[str, dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """扫一遍硬规则，返回命中列表（同一位置只报一次，按风险与位置排序）。
+
+    传了 replacements 时，每条命中会附带 suggestion（推荐修改文案）。
+    """
     rules = rules if rules is not None else load_rules()
     rules = [_compile_rule(r) for r in rules]
     hits: list[dict[str, Any]] = []
@@ -222,6 +277,11 @@ def lint(text: str, rules: list[dict[str, Any]] | None = None) -> list[dict[str,
                     "context": _snippet(text, span[0], span[1]),
                     "reason": rule["reason"],
                     "source": rule["source"],
+                    "suggestion": (
+                        suggest_replacement(matched, replacements, rule["category"])
+                        if replacements is not None
+                        else None
+                    ),
                 }
             )
 
@@ -403,7 +463,7 @@ def check(
 
     rules = rules if rules is not None else load_rules()
     replacements = replacements if replacements is not None else load_replacements()
-    hits = lint(text, rules)
+    hits = lint(text, rules, replacements)
 
     result: dict[str, Any] = {
         "text": text,
@@ -433,6 +493,8 @@ def _print_human(result: dict[str, Any]) -> None:
         print(f"  [{h['risk']}] {h['rule_id']}{cat_note}")
         print(f"       命中：{h['matched']}")
         print(f"       位置：{h['context']}")
+        if h.get("suggestion"):
+            print(f"       建议：{h['suggestion']}")
         print(f"       依据：{h['source']}")
 
     if not result["hits"]:
@@ -545,6 +607,24 @@ def _selftest() -> int:
     )
     failures += 0 if ok else 1
     print(f"{'PASS' if ok else 'FAIL'}  R017 只进人工清单、不参与自动命中  实际 {[m['rule_id'] for m in manual]}")
+
+    # 推荐修改文案：每条命中都要能给出替换建议（取不到时允许为空）
+    s_hits = lint("养死包赔，四季开花，全网最低价，包开花", rules, replacements)
+    got = {h["matched"]: h.get("suggestion") for h in s_hits}
+    ok = (
+        got.get("养死包赔", "").startswith("含7天绿植险")
+        and "秋季盛花" in got.get("四季开花", "")
+        and got.get("全网最低", "") == "产区直供，性价比款"
+        and got.get("包开花", "") != ""
+    )
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  每条命中都带推荐修改文案  实际 {got}")
+
+    # 不在替换表里的命中，建议必须是 None，不能瞎编
+    trick = [{"id": "TX", "pattern": "冷门说法", "risk": "中", "reason": "-", "source": "-"}]
+    ok = lint("一句冷门说法", trick, replacements)[0]["suggestion"] is None
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  替换表没有的说法不给建议（不编造）")
 
     # exclude 扩展：命中但含豁免词时不报
     custom = [{"id": "T1", "pattern": "第一", "risk": "高", "reason": "-", "source": "-", "exclude": ["第一次"]}]
