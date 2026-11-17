@@ -42,7 +42,14 @@ def load_replacements() -> dict:
 
 
 def get_api_key() -> str | None:
-    """优先级：Streamlit Secrets > 环境变量 / .env。本地和云端都能直接用。"""
+    """优先级：侧栏临时填写 > Streamlit Secrets > 环境变量 / .env。
+
+    侧栏那个是给「找不到 Secrets 菜单」时兜底用的：只存在浏览器会话里，
+    不落盘、不进仓库，刷新页面需要重填。
+    """
+    tmp = (st.session_state.get("tmp_key") or "").strip()
+    if tmp:
+        return tmp
     try:
         if "DEEPSEEK_API_KEY" in st.secrets:  # type: ignore[attr-defined]
             key = str(st.secrets["DEEPSEEK_API_KEY"]).strip()  # type: ignore[attr-defined]
@@ -115,6 +122,16 @@ with st.sidebar:
         secret_names = []
     st.caption("Secrets 键：" + ("、".join(secret_names) if secret_names else "（没有读到任何键）"))
     st.caption("API Key：" + ("✅ 已读取" if get_api_key() else "❌ 未配置"))
+
+    if not get_api_key():
+        st.text_input(
+            "临时 API Key（不保存，可随时撤回）",
+            type="password",
+            key="tmp_key",
+            placeholder="sk-...",
+            help="填在这里只对当前浏览器会话有效：不写入磁盘、不进仓库，刷新页面即失效。"
+            "长期使用请配到 Settings → Secrets。",
+        )
     st.divider()
     st.caption(
         "云端配置路径：应用页 `⋮` → `Settings` → `Secrets`，"
