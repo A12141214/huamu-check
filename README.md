@@ -1,5 +1,7 @@
 # huamu-check —— 沭阳花木抖音口播文案合规检查
 
+**在线地址**：<https://huamu-check-cpedfhcudsasunffkj3a7x.streamlit.app/>
+
 硬规则先扫，命中才调 DeepSeek 改写。**没命中就不发请求、不花钱。**
 
 ```
