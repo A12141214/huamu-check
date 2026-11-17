@@ -109,6 +109,7 @@ replacements = load_replacements()
 categories = core.load_categories()
 auto_rules = [r for r in rules if not r["manual_review"]]
 manual_rules = [r for r in rules if r["manual_review"]]
+manual_items = core.manual_review_items(rules, categories)
 
 st.title("🌿 花木口播文案合规校验")
 st.caption(
@@ -270,6 +271,19 @@ with tab_single:
                         st.markdown(h["reason"])
                         st.caption(f"依据：{h['source']}")
                         st.caption(f"上下文：…{h['context']}…")
+
+            if manual_items:
+                with st.expander(f"⚠️ 另有 {len(manual_items)} 条需人工复核（不计入命中数）"):
+                    st.caption(
+                        "这些规则依赖“口播 vs 详情页”的跨源比对，正则判不了。"
+                        "上面显示 0 命中也不代表完全合规，请对照详情页人工确认。"
+                    )
+                    for m in manual_items:
+                        st.markdown(
+                            f"**{m['rule_id']}** · {m['category']} {m['category_name']} · {m['risk']}"
+                        )
+                        st.caption(m["reason"])
+                        st.caption(f"依据：{m['source']}")
 
     # 改写结果放整行，方便复制
     result = st.session_state.get("result")

@@ -37,8 +37,12 @@ def main() -> None:
         for r in rules
         if not r.get("manual_review")
     ]
-    # 去掉 _note 这类非映射字段
-    groups = {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in replacements.items()}
+    # 去掉 _note 这类非映射字段（顶层说明是字符串，不是分组）
+    groups = {
+        k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")}
+        for k, v in replacements.items()
+        if isinstance(v, dict)
+    }
 
     payload = json.dumps(
         {"rules": slim_rules, "categories": categories, "replacements": groups},
@@ -152,7 +156,7 @@ function lint(text){
     let m;
     while((m=rule.re.exec(text))!==null){
       if(m[0].length===0){ rule.re.lastIndex++; continue; }
-      hits.push({id:rule.id,risk:rule.risk,reason:rule.reason,source:rule.source,
+      hits.push({id:rule.id,category:rule.category,risk:rule.risk,reason:rule.reason,source:rule.source,
                  matched:m[0],start:m.index,end:m.index+m[0].length});
     }
   }

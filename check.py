@@ -42,35 +42,36 @@ RISK_ORDER = {"极高": 0, "高": 1, "中": 2, "低": 3}
 
 # 命中词 -> 替换分组。分组选取靠“原文实际命中片段”判断，不看规则 id。
 GROUP_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "售后承诺类": (
+    "A_售后与成活保证": (
         "养死", "死苗", "枯死", "枯了", "养不活", "包赔", "包退", "包活", "包成活", "保活",
         "包开花", "包结果", "包发芽", "包生根", "包出苗", "全活", "补发", "冻坏", "冻死",
-        "冻伤", "不赔", "不售后", "不负责", "不管", "没人赔", "自理",
+        "冻伤", "不赔", "不售后", "不负责", "不管", "没人赔", "自理", "发芽", "见效",
     ),
-    "时间承诺类": ("天", "个月", "周", "星期", "发芽", "见效"),
-    "花期与生长属性类": ("四季", "全年", "一年四季", "常年", "天天", "三季", "开花", "有花", "挂果", "结果", "采摘", "百日红", "320天", "永不凋谢", "花开不断", "花期最长", "永不枯萎"),
-    "种植难度与区域类": (
-        "南北方", "南北", "全国", "全国各地", "各地", "哪里", "哪都", "到处", "任何地方", "随便种",
+    "B_效果与生长属性": (
+        "四季", "全年", "一年四季", "常年", "天天", "三季", "开花", "有花", "挂果", "结果",
+        "采摘", "百日红", "320天", "永不凋谢", "花开不断", "花期最长", "永不枯萎",
+        "南北方", "南北", "全国", "各地", "哪里", "哪都", "到处", "随便种",
         "浇水", "浇点水", "给点水", "见水", "沾土", "见土", "插土", "放养", "不用管", "死不了", "养不死",
     ),
-    "品种与规格类": (
-        "五彩", "红粉", "中国红", "牡丹玉兰", "郁金香玉兰", "七彩", "纯蓝色", "蓝色", "绿色", "虚构",
-        "进口", "原装进口", "扦插", "嫁接", "播种", "种子", "授粉", "自花", "异花", "苗数", "花剑",
+    "C_品种与来源": (
+        "五彩", "红粉", "中国红", "牡丹玉兰", "郁金香玉兰", "七彩", "纯蓝色", "蓝色", "绿色",
+        "虚构", "进口", "原装进口", "扦插", "嫁接", "播种", "种子", "授粉", "自花", "异花",
     ),
-    "展示与信息来源类": (
+    "D_商品展示与信息一致性": (
         "主图", "详情页", "讲解", "展示", "成熟", "成品", "AI", "P图", "合成", "修图", "胶水",
-        "铁丝", "拼接", "遇水开花", "干枝", "一物一拍", "专拍", "所见即所得", "一模一样", "零差异",
+        "铁丝", "拼接", "遇水开花", "干枝", "一物一拍", "专拍", "所见即所得", "一模一样",
+        "零差异", "苗数", "花剑",
     ),
-    "绝对化用语类": (
+    "E_绝对化与保证性用语": (
         "最低", "最便宜", "最好", "最佳", "最优", "最强", "全场", "史上", "历史", "第一", "绝对",
         "100%", "百分百", "唯一", "独家", "顶级", "首选", "国家级", "世界级", "保证",
     ),
-    "功效与迷信类": (
+    "F_功效与封建迷信": (
         "招财", "辟邪", "镇宅", "化煞", "转运", "旺财", "风水", "开光", "灵力", "挡灾", "消灾",
         "改运", "治疗", "治愈", "药用", "入药", "消炎", "杀菌", "降血压", "降血糖", "抗癌", "防癌",
         "保健", "养生", "医疗", "药效",
     ),
-    "禁售与来源类": (
+    "G_禁售品种与特殊品类": (
         "榴莲", "蓝莓籽种", "七彩草莓", "火龙果", "蓝桂苗", "银冠玉", "乌羽玉", "鸡枞", "野生",
         "兰花", "石斛", "杜鹃", "百草枯", "农药", "瘦肉精", "兽用", "处方药",
     ),
@@ -228,19 +229,64 @@ def lint(text: str, rules: list[dict[str, Any]] | None = None) -> list[dict[str,
     return hits
 
 
+def manual_review_items(
+    rules: list[dict[str, Any]] | None = None,
+    categories: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """manual_review 规则的清单：正则判不了，只能人工看，**不计入命中**。
+
+    这类规则（如 R017 口播 vs 详情页跨源比对）pattern 是 "(?!)" 占位，永远不会匹配。
+    显式返回出来，是为了让结果里有个“还有这些要你自己看一眼”的提示，
+    而不是让商家以为全部检查通过了。
+    """
+    rules = rules if rules is not None else load_rules()
+    categories = categories if categories is not None else load_categories()
+    return [
+        {
+            "rule_id": r["id"],
+            "category": r["category"],
+            "category_name": categories.get(r["category"], ""),
+            "risk": r["risk"],
+            "reason": r["reason"],
+            "source": r["source"],
+        }
+        for r in rules
+        if r["manual_review"]
+    ]
+
+
 # ========== 3. 构建替换参考 ==========
+def group_name_for(category: str, categories: dict[str, str] | None = None) -> str:
+    """类别编号 -> 替换表组名，例如 "A" -> "A_售后与成活保证"。"""
+    categories = categories if categories is not None else load_categories()
+    name = categories.get(category, "")
+    return f"{category}_{name}" if name else ""
+
+
 def build_replacement_context(
     hits: list[dict[str, Any]],
     replacements: dict[str, dict[str, str]] | None = None,
+    categories: dict[str, str] | None = None,
 ) -> dict[str, dict[str, str]]:
-    """只把与命中相关的替换组拿出来，避免 prompt 过长、也避免模型被无关例句带跑。"""
+    """只把与命中相关的替换组拿出来，避免 prompt 过长、也避免模型被无关例句带跑。
+
+    取组顺序：先按命中的 category 精确取（组名 A_… 到 G_…），类别缺失时再退回关键词匹配。
+    """
     replacements = replacements if replacements is not None else load_replacements()
-    hit_text = " ".join(h["matched"] for h in hits)
+    categories = categories if categories is not None else load_categories()
 
     relevant: dict[str, dict[str, str]] = {}
-    for group, keywords in GROUP_KEYWORDS.items():
-        if group in replacements and any(kw in hit_text for kw in keywords):
-            relevant[group] = replacements[group]
+    for h in hits:
+        key = group_name_for(h.get("category", ""), categories)
+        if key and key in replacements:
+            relevant[key] = replacements[key]
+
+    if not relevant:
+        # 兜底：调用方没给 category（比如自定义规则）时按关键词猜
+        hit_text = " ".join(h["matched"] for h in hits)
+        for group, keywords in GROUP_KEYWORDS.items():
+            if group in replacements and any(kw in hit_text for kw in keywords):
+                relevant[group] = replacements[group]
     return relevant
 
 
@@ -359,7 +405,13 @@ def check(
     replacements = replacements if replacements is not None else load_replacements()
     hits = lint(text, rules)
 
-    result: dict[str, Any] = {"text": text, "hits": hits, "advice": None, "rewritten": False}
+    result: dict[str, Any] = {
+        "text": text,
+        "hits": hits,
+        "manual_review": manual_review_items(rules),
+        "advice": None,
+        "rewritten": False,
+    }
     if not hits or not rewrite:
         return result
 
@@ -391,12 +443,13 @@ def _print_human(result: dict[str, Any]) -> None:
         print("\n" + "-" * 56)
         print(result["advice"])
 
-    manual = [r for r in load_rules() if r["manual_review"]]
+    manual = result.get("manual_review") or []
     if manual:
         print("\n" + "-" * 56)
-        print(f"另有 {len(manual)} 条规则需人工复核（正则无法判定）：")
+        print(f"另有 {len(manual)} 条需人工复核（正则判不了，不计入上方命中数）：")
         for r in manual:
-            print(f"  {r['id']}（{r['risk']}）：{r['reason'][:40]}……")
+            cat = f"{r['category']} {r['category_name']}".strip()
+            print(f"  {r['rule_id']}（{r['risk']} · {cat}）：{r['reason'][:46]}……")
 
     print("\n" + "-" * 56)
     print("提示：以上结果为 AI 辅助建议，规则出处已标注，最终发布前请人工确认。")
@@ -452,27 +505,46 @@ def _selftest() -> int:
         failures += 0 if ok else 1
         print(f"{'PASS' if ok else 'FAIL'}  期望 {expect} 实际 {got}   {text}")
 
-    # 关键回归：R002 必须报完整片段“冻坏不赔”，并且能带出售后承诺类的替换组
+    # 关键回归：R002 必须报完整片段“冻坏不赔”，并且能带出 A_ 开头的替换组
     hit = lint("不拍保温棉，冻坏不赔啊", rules)[0]
     ok = hit["matched"] == "冻坏不赔"
     failures += 0 if ok else 1
     print(f"{'PASS' if ok else 'FAIL'}  完整命中片段（不是只有捕获组）实际 {hit['matched']!r}")
 
     groups = build_replacement_context([hit], replacements)
-    ok = "售后承诺类" in groups
+    ok = "A_售后与成活保证" in groups
     failures += 0 if ok else 1
-    print(f"{'PASS' if ok else 'FAIL'}  R002 能带出售后承诺类替换组 实际 {list(groups)}")
+    print(f"{'PASS' if ok else 'FAIL'}  R002 带出 A_售后与成活保证 组 实际 {list(groups)}")
+
+    # 组名必须和类别一一对齐：每个用到的类别都要能在替换表里找到对应组
+    cats = load_categories()
+    expect_groups = {f"{code}_{name}" for code, name in cats.items()}
+    missing = expect_groups - set(replacements)
+    ok = not missing
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  替换表组名与 A–G 类别完全对齐  缺：{sorted(missing) or '无'}")
+
+    # 多类别同时命中时，应该把多个组一起取出来
+    many = lint("五彩月季包开花，招财辟邪，全网最低价", rules)
+    got_groups = set(build_replacement_context(many, replacements))
+    ok = {"C_品种与来源", "A_售后与成活保证", "F_功效与封建迷信", "E_绝对化与保证性用语"} <= got_groups
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  多类别命中带出多组  实际 {sorted(got_groups)}")
 
     # 风控：命中排序必须是“极高”在前
     ok = ids("全网最低价，养死包赔") == ["R001", "R021"]
     failures += 0 if ok else 1
     print(f"{'PASS' if ok else 'FAIL'}  按风险排序，极高优先  实际 {ids('全网最低价，养死包赔')}")
 
-    # manual_review 规则只进人工清单，绝不能出现在命中里
-    manual = [r["id"] for r in rules if r["manual_review"]]
-    ok = manual == ["R017"] and "R017" not in ids("口播说三年龄苗，详情页写五年苗")
+    # manual_review：只进人工清单，绝不能出现在命中里
+    manual = manual_review_items(rules)
+    ok = (
+        [m["rule_id"] for m in manual] == ["R017"]
+        and "R017" not in ids("口播说三年龄苗，详情页写五年苗")
+        and check("口播说三年龄苗", rewrite=False)["manual_review"][0]["rule_id"] == "R017"
+    )
     failures += 0 if ok else 1
-    print(f"{'PASS' if ok else 'FAIL'}  R017 只进人工清单、不参与自动命中  实际 {manual}")
+    print(f"{'PASS' if ok else 'FAIL'}  R017 只进人工清单、不参与自动命中  实际 {[m['rule_id'] for m in manual]}")
 
     # exclude 扩展：命中但含豁免词时不报
     custom = [{"id": "T1", "pattern": "第一", "risk": "高", "reason": "-", "source": "-", "exclude": ["第一次"]}]
