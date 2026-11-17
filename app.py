@@ -23,7 +23,7 @@ st.set_page_config(
     page_title="花木口播文案合规校验",
     page_icon="🌿",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 RISK_BADGE = {"极高": "🔴", "高": "🟠", "中": "🟡", "低": "🟢"}
@@ -340,9 +340,22 @@ st.markdown(
   }
   .hm-foot b{color:#6E7E73; font-weight:600;}
   @media (max-width:720px){
-    .hm-hero{padding:24px 22px; border-radius:18px;}
+    .block-container{padding-left:14px; padding-right:14px;}
+    .hm-hero{padding:22px 20px; border-radius:18px;}
     .hm-hero h1{font-size:23px;}
+    .hm-hero p{font-size:12.5px; line-height:1.7;}
+    .hm-chip{font-size:11.5px; padding:4px 10px;}
+    .hm-plat{margin:16px 0 4px;}
     .hm-step{min-width:100%;}
+    .hm-section{margin:20px 0 10px;}
+    .hm-section .hint{display:none;}
+    /* 手机上四张指标卡会竖排，压扁它们，别占掉一屏 */
+    div[data-testid="stMetric"]{padding:12px 14px 10px; border-radius:12px;}
+    div[data-testid="stMetricValue"]{font-size:22px !important;}
+    div[data-testid="stMetricLabel"] p{font-size:11px !important;}
+    .hm-orig{font-size:14px; line-height:1.9; padding:11px 12px;}
+    .hm-sug-row{flex-wrap:wrap; gap:6px;}
+    .hm-foot{gap:8px; font-size:11px;}
   }
 </style>
 """,
