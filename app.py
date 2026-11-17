@@ -106,11 +106,14 @@ def top_risk(hits: list[dict]) -> str:
 # ========== 页面 ==========
 rules = load_rules()
 replacements = load_replacements()
+categories = core.load_categories()
+auto_rules = [r for r in rules if not r["manual_review"]]
+manual_rules = [r for r in rules if r["manual_review"]]
 
 st.title("🌿 花木口播文案合规校验")
 st.caption(
-    f"粘贴抖音花木口播文案 → 扫 {len(rules)} 条硬红线 → 命中后给出依据与合规改写。"
-    "未命中不调用模型、不计费。"
+    f"粘贴抖音花木口播文案 → 扫 {len(auto_rules)} 条硬红线（{len(categories)} 个类别）→ "
+    "命中后给出依据与合规改写。未命中不调用模型、不计费。"
 )
 
 # 配置自检：云端 Secrets 写错键名/没保存，从界面上就能看出来，不用靠猜
@@ -241,7 +244,7 @@ with tab_single:
             m1, m2, m3 = st.columns(3)
             m1.metric("命中条数", len(hits))
             m2.metric("最高风险", top_risk(hits))
-            m3.metric("规则总数", len(rules))
+            m3.metric("规则总数", len(auto_rules))
 
             if not hits:
                 st.success("未命中硬规则 ✅")
@@ -257,8 +260,10 @@ with tab_single:
                 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
                 for h in hits:
+                    cat = categories.get(h.get("category", ""), "")
+                    cat_note = f" · {h['category']} {cat}" if cat else ""
                     with st.expander(
-                        f"{RISK_BADGE.get(h['risk'], '⚪')} {h['rule_id']} · {h['risk']} · "
+                        f"{RISK_BADGE.get(h['risk'], '⚪')} {h['rule_id']}{cat_note} · {h['risk']} · "
                         f"命中「{h['matched']}」",
                         expanded=len(hits) <= 2,
                     ):
@@ -340,10 +345,21 @@ with tab_batch:
 # ---------- 规则库 ----------
 with tab_rules:
     st.caption("改规则请直接编辑 rules.json / replacements.json，刷新页面即生效。")
-    for r in rules:
-        with st.expander(f"{RISK_BADGE.get(r['risk'], '⚪')} {r['id']} · {r['risk']} · `{r['regex'].pattern}`"):
-            st.markdown(r["reason"])
-            st.caption(f"依据：{r['source']}")
+    for code, name in categories.items():
+        group = [r for r in rules if r["category"] == code]
+        if not group:
+            continue
+        st.markdown(f"#### {code} · {name}（{len(group)} 条）")
+        for r in group:
+            if r["manual_review"]:
+                tag = "需人工复核"
+                body = f"**{tag}** · {r['reason']}"
+            else:
+                tag = f"`{r['regex'].pattern}`"
+                body = r["reason"]
+            with st.expander(f"{RISK_BADGE.get(r['risk'], '⚪')} {r['id']} · {r['risk']} · {tag}"):
+                st.markdown(body)
+                st.caption(f"依据：{r['source']}")
     st.divider()
     st.markdown("**替换表分组**")
     st.write("、".join(f"`{k}`（{len(v)} 条）" for k, v in replacements.items()))

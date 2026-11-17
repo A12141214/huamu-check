@@ -50,6 +50,7 @@ def run(use_ai: bool) -> int:
     report("只体检无异常", not at.exception, _text_of(at.exception))
     metrics = [str(m.value) for m in at.metric]
     report("命中数为 3", metrics[:2] == ["3", "极高"], f"metrics={metrics}")
+    report("规则总数 24（R017 需人工复核，不计入自动检测）", metrics[2:3] == ["24"], f"metrics={metrics}")
     report("逐条命中卡片", len(at.expander) >= 3, f"expander={len(at.expander)}")
     report("只体检不调模型", any("跳过模型改写" in str(c.value) for c in at.caption))
 

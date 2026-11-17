@@ -44,18 +44,35 @@ RISK_ORDER = {"极高": 0, "高": 1, "中": 2, "低": 3}
 GROUP_KEYWORDS: dict[str, tuple[str, ...]] = {
     "售后承诺类": (
         "养死", "死苗", "枯死", "枯了", "养不活", "包赔", "包退", "包活", "包成活", "保活",
-        "包开花", "包结果", "包发芽", "补发", "冻坏", "冻死", "冻伤", "冻了", "不赔", "不售后",
-        "不负责", "不管", "没人赔", "自理",
+        "包开花", "包结果", "包发芽", "包生根", "包出苗", "全活", "补发", "冻坏", "冻死",
+        "冻伤", "不赔", "不售后", "不负责", "不管", "没人赔", "自理",
     ),
-    "花期与生长属性类": ("四季", "全年", "一年四季", "常年", "天天", "三季", "开花", "有花", "挂果", "结果", "采摘", "百日红", "320天"),
+    "时间承诺类": ("天", "个月", "周", "星期", "发芽", "见效"),
+    "花期与生长属性类": ("四季", "全年", "一年四季", "常年", "天天", "三季", "开花", "有花", "挂果", "结果", "采摘", "百日红", "320天", "永不凋谢", "花开不断", "花期最长", "永不枯萎"),
     "种植难度与区域类": (
-        "南北方", "南北", "全国", "全国各地", "各地", "哪里", "哪都", "任何地方", "随便种",
+        "南北方", "南北", "全国", "全国各地", "各地", "哪里", "哪都", "到处", "任何地方", "随便种",
         "浇水", "浇点水", "给点水", "见水", "沾土", "见土", "插土", "放养", "不用管", "死不了", "养不死",
     ),
-    "品种与规格类": ("五彩", "红粉", "中国红", "牡丹玉兰", "虚构"),
+    "品种与规格类": (
+        "五彩", "红粉", "中国红", "牡丹玉兰", "郁金香玉兰", "七彩", "纯蓝色", "蓝色", "绿色", "虚构",
+        "进口", "原装进口", "扦插", "嫁接", "播种", "种子", "授粉", "自花", "异花", "苗数", "花剑",
+    ),
+    "展示与信息来源类": (
+        "主图", "详情页", "讲解", "展示", "成熟", "成品", "AI", "P图", "合成", "修图", "胶水",
+        "铁丝", "拼接", "遇水开花", "干枝", "一物一拍", "专拍", "所见即所得", "一模一样", "零差异",
+    ),
     "绝对化用语类": (
-        "最低", "最便宜", "最划算", "最省钱", "全场", "史上", "历史", "第一", "绝对", "100%",
-        "百分百", "唯一", "独家", "顶级", "首选", "国家级", "世界级",
+        "最低", "最便宜", "最好", "最佳", "最优", "最强", "全场", "史上", "历史", "第一", "绝对",
+        "100%", "百分百", "唯一", "独家", "顶级", "首选", "国家级", "世界级", "保证",
+    ),
+    "功效与迷信类": (
+        "招财", "辟邪", "镇宅", "化煞", "转运", "旺财", "风水", "开光", "灵力", "挡灾", "消灾",
+        "改运", "治疗", "治愈", "药用", "入药", "消炎", "杀菌", "降血压", "降血糖", "抗癌", "防癌",
+        "保健", "养生", "医疗", "药效",
+    ),
+    "禁售与来源类": (
+        "榴莲", "蓝莓籽种", "七彩草莓", "火龙果", "蓝桂苗", "银冠玉", "乌羽玉", "鸡枞", "野生",
+        "兰花", "石斛", "杜鹃", "百草枯", "农药", "瘦肉精", "兽用", "处方药",
     ),
 }
 
@@ -127,13 +144,23 @@ def _compile_rule(item: dict[str, Any]) -> dict[str, Any]:
             raise CheckError(f"规则 {rid} 的正则无法编译：{pattern!r}（{exc}）") from exc
     return {
         "id": rid,
+        "category": str(item.get("category") or ""),
         "risk": str(item.get("risk") or "中"),
         "reason": str(item.get("reason") or ""),
         "source": str(item.get("source") or ""),
         "regex": regex,
+        # manual_review：依赖跨源比对（口播 vs 详情页），正则判不了，只作为人工清单
+        "manual_review": bool(item.get("manual_review")),
         # 可选扩展：命中处前后若出现这些词，则忽略该次命中（用来压误报）
         "exclude": tuple(item.get("exclude") or ()),
     }
+
+
+def load_categories(path: str = RULES_PATH) -> dict[str, str]:
+    """类别编号 -> 名称，例如 {"A": "售后与成活保证"}。"""
+    data = _read_json(path)
+    cats = data.get("categories") or {}
+    return {str(k): str(v) for k, v in cats.items()}
 
 
 def load_rules(path: str = RULES_PATH) -> list[dict[str, Any]]:
@@ -167,6 +194,9 @@ def lint(text: str, rules: list[dict[str, Any]] | None = None) -> list[dict[str,
     seen: set[tuple[str, int, int]] = set()
 
     for rule in rules:
+        if rule["manual_review"]:
+            # 跨源比对类规则（口播 vs 详情页）无法用正则判定，只进人工清单
+            continue
         for m in rule["regex"].finditer(text):
             # group(0) 才是完整命中（如“冻坏不赔”），不是第一个捕获组
             matched = m.group(0)
@@ -183,6 +213,7 @@ def lint(text: str, rules: list[dict[str, Any]] | None = None) -> list[dict[str,
             hits.append(
                 {
                     "rule_id": rule["id"],
+                    "category": rule["category"],
                     "risk": rule["risk"],
                     "matched": matched,
                     "start": span[0],
@@ -222,11 +253,18 @@ def _make_client(api_key: str | None) -> OpenAI:
     return OpenAI(api_key=key, base_url=BASE_URL, timeout=120, max_retries=2)
 
 
-def _build_prompt(text: str, hits: list[dict[str, Any]], replacement_context: dict[str, Any]) -> str:
+def _build_prompt(
+    text: str,
+    hits: list[dict[str, Any]],
+    replacement_context: dict[str, Any],
+    categories: dict[str, str] | None = None,
+) -> str:
+    categories = categories or {}
     hit_context = json.dumps(
         [
             {
                 "rule_id": h["rule_id"],
+                "category": categories.get(h.get("category", ""), h.get("category", "")),
                 "risk": h["risk"],
                 "matched": h["matched"],
                 "context": h["context"],
@@ -283,7 +321,7 @@ def rewrite_with_deepseek(
     if not hits:
         raise CheckError("没有命中规则，不需要调用模型")
 
-    prompt = _build_prompt(text, hits, build_replacement_context(hits, replacements))
+    prompt = _build_prompt(text, hits, build_replacement_context(hits, replacements), load_categories())
     client = client or _make_client(api_key)
     response = client.chat.completions.create(
         model=model,
@@ -331,13 +369,17 @@ def check(
 
 
 def _print_human(result: dict[str, Any]) -> None:
+    categories = load_categories()
     print("=" * 56)
     print("原文案：")
     print(result["text"])
     print(f"\n硬规则命中：{len(result['hits'])} 条")
 
     for h in result["hits"]:
-        print(f"  [{h['risk']}] {h['rule_id']}  命中：{h['matched']}")
+        cat = categories.get(h.get("category", ""), "")
+        cat_note = f" · 类别 {h['category']} {cat}" if cat else ""
+        print(f"  [{h['risk']}] {h['rule_id']}{cat_note}")
+        print(f"       命中：{h['matched']}")
         print(f"       位置：{h['context']}")
         print(f"       依据：{h['source']}")
 
@@ -348,6 +390,13 @@ def _print_human(result: dict[str, Any]) -> None:
     else:
         print("\n" + "-" * 56)
         print(result["advice"])
+
+    manual = [r for r in load_rules() if r["manual_review"]]
+    if manual:
+        print("\n" + "-" * 56)
+        print(f"另有 {len(manual)} 条规则需人工复核（正则无法判定）：")
+        for r in manual:
+            print(f"  {r['id']}（{r['risk']}）：{r['reason'][:40]}……")
 
     print("\n" + "-" * 56)
     print("提示：以上结果为 AI 辅助建议，规则出处已标注，最终发布前请人工确认。")
@@ -363,22 +412,37 @@ def _selftest() -> int:
         return [h["rule_id"] for h in lint(text, rules)]
 
     cases: list[tuple[str, list[str]]] = [
-        ("家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！", ["R001", "R003", "R004"]),
+        # A 售后与成活保证
+        ("家人们看这棵桂花，四季开花，养死包赔，全网最低价，喜欢的赶紧下单！", ["R001", "R005", "R021"]),
         ("不拍保温棉，冻坏不赔啊", ["R002"]),
-        ("南北方均可种植，浇水就活，新手也能养", ["R005", "R006"]),
-        ("玉兰四季开花，一年开三季", ["R003", "R003"]),
+        ("咱们家包成活、包开花，30天发芽", ["R003", "R003", "R004"]),
+        # B 效果与生长属性
+        ("玉兰四季开花，一年开三季", ["R005"]),
+        ("南北方均可种植，浇水就活", ["R007", "R006"]),
+        ("这花永不凋谢，花开不断", ["R008", "R008"]),
+        # C 品种与来源
+        ("这是五彩月季，进口品种", ["R009", "R010"]),
+        ("扦插苗，也可以直接播种", ["R011"]),
+        # D 商品展示
+        ("主图是成熟大树，实际发种苗", ["R013"]),
+        ("AI 合成了一张果实挂满枝的图", ["R014"]),
+        ("用胶水把果子粘上去", ["R015"]),
+        ("发货苗数和详情页不一致", ["R016"]),
+        ("遇水开花，实际收到是干枝", ["R018"]),
+        ("所见即所得，收到和直播间一模一样", ["R020", "R020"]),
+        # E/F/G
+        ("全网最低价，保证成活", ["R021", "R021"]),
+        ("摆家里招财辟邪", ["R022", "R022"]),
+        ("这个能降血压，还能入药", ["R023", "R023"]),
+        ("卖蓝莓籽种和榴莲苗", ["R024", "R024"]),
+        ("高毒农药我们也有", ["R025"]),
+        # 合规文案不应命中
         ("这款月季含7天绿植险，秋季盛花，具体以详情页为准", []),
         ("产地直发，今天拍明天发，苗龄两年", []),
-        # —— 漏报补丁的回归（这些以前全都漏）；同一句两处违规应分别报出 ——
-        ("死苗补发，还包成活", ["R001", "R001"]),
-        ("冻死了没人赔，冻伤不管", ["R002", "R002"]),
-        ("全场最低价，仅此一天", ["R004"]),
-        ("全国各地都能种，给点水就能活", ["R005", "R006"]),
-        # —— 误报补丁的回归（这些以前全都误伤）——
+        # —— 误报回归：这三类说法在直播间天天出现，不能报 ——
         ("这桂花四季常绿，很好养", []),
         ("第一次养花也不怕，第一年就挂果", []),
-        ("全国各地发货，48 小时发出", []),
-        ("全国种苗基地直销", []),
+        ("今天下单有红包活动，礼包套餐都有", []),
     ]
 
     failures = 0
@@ -400,9 +464,15 @@ def _selftest() -> int:
     print(f"{'PASS' if ok else 'FAIL'}  R002 能带出售后承诺类替换组 实际 {list(groups)}")
 
     # 风控：命中排序必须是“极高”在前
-    ok = ids("全网最低价，养死包赔") == ["R001", "R004"]
+    ok = ids("全网最低价，养死包赔") == ["R001", "R021"]
     failures += 0 if ok else 1
-    print(f"{'PASS' if ok else 'FAIL'}  按风险排序，极高优先")
+    print(f"{'PASS' if ok else 'FAIL'}  按风险排序，极高优先  实际 {ids('全网最低价，养死包赔')}")
+
+    # manual_review 规则只进人工清单，绝不能出现在命中里
+    manual = [r["id"] for r in rules if r["manual_review"]]
+    ok = manual == ["R017"] and "R017" not in ids("口播说三年龄苗，详情页写五年苗")
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'}  R017 只进人工清单、不参与自动命中  实际 {manual}")
 
     # exclude 扩展：命中但含豁免词时不报
     custom = [{"id": "T1", "pattern": "第一", "risk": "高", "reason": "-", "source": "-", "exclude": ["第一次"]}]

@@ -19,25 +19,31 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE_DIR, "docs", "checker.html")
 
 
-def load() -> tuple[list[dict], dict]:
+def load() -> tuple[list[dict], dict, dict]:
     with open(os.path.join(BASE_DIR, "rules.json"), encoding="utf-8-sig") as f:
-        rules = json.load(f)["rules"]
+        data = json.load(f)
     with open(os.path.join(BASE_DIR, "replacements.json"), encoding="utf-8-sig") as f:
         replacements = json.load(f)
-    return rules, replacements
+    return data["rules"], replacements, data.get("categories", {})
 
 
 def main() -> None:
-    rules, replacements = load()
+    rules, replacements, categories = load()
+    manual = [r for r in rules if r.get("manual_review")]
 
-    # 只挑规则必需的字段，避免把说明里的长文本重复塞进页面
+    # 只挑规则必需的字段；manual_review 的规则没有可执行正则，不进前端匹配
     slim_rules = [
-        {k: r[k] for k in ("id", "pattern", "risk", "reason", "source")} for r in rules
+        {k: r.get(k, "") for k in ("id", "category", "pattern", "risk", "reason", "source")}
+        for r in rules
+        if not r.get("manual_review")
     ]
     # 去掉 _note 这类非映射字段
     groups = {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in replacements.items()}
 
-    payload = json.dumps({"rules": slim_rules, "replacements": groups}, ensure_ascii=False)
+    payload = json.dumps(
+        {"rules": slim_rules, "categories": categories, "replacements": groups},
+        ensure_ascii=False,
+    )
     # </script> 出现在 JSON 里会提前闭合脚本块
     payload = payload.replace("</", "<\\/")
 
@@ -47,7 +53,10 @@ def main() -> None:
         f.write(html)
 
     size = os.path.getsize(OUT)
-    print(f"已生成 {OUT}（{size / 1024:.1f} KB，{len(slim_rules)} 条规则）")
+    print(
+        f"已生成 {OUT}（{size / 1024:.1f} KB，{len(slim_rules)} 条可自动检测规则，"
+        f"{len(manual)} 条需人工复核）"
+    )
     print("线上地址示例：https://cdn.jsdelivr.net/gh/A12141214/huamu-check@main/docs/checker.html")
 
 
@@ -197,9 +206,10 @@ function render(text){
   const top=hits[0].risk;
   const cards=hits.map(h=>{
     const sg=suggest(h.matched);
+    const cat=DATA.categories[h.category]||"";
     return `<div class="hit">
       <h3><span class="tag ${RISK_CLASS[h.risk]||"mid"}">${h.risk}</span>
-          ${h.id} · 命中「${esc(h.matched)}」</h3>
+          ${h.id}${cat?` · ${esc(cat)}`:""} · 命中「${esc(h.matched)}」</h3>
       <p>${esc(h.reason)}</p>
       <p class="src">依据：${esc(h.source)}</p>
       ${sg?`<div class="sug"><b>合规说法：</b>${esc(sg)}</div>`:""}
