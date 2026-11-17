@@ -35,92 +35,241 @@ st.markdown(
     """
 <style>
   :root{
-    --hm-ink:#16211a; --hm-muted:#68756b; --hm-green:#1f7a3f; --hm-green-l:#2f9e56;
-    --hm-line:#e3e9e4; --hm-card:#ffffff; --hm-bg:#f6f8f6;
+    --ink:#0F1A13; --ink-2:#28362C; --muted:#6C7A70; --muted-2:#8C988F;
+    --green:#1B7A43; --green-d:#0F4A29; --green-l:#2E9A57; --green-soft:#EEF6F0;
+    --line:#E6ECE7; --line-2:#F0F4F1; --bg:#F7F9F7; --card:#FFFFFF;
+    --risk-a:#B42318; --risk-a-bg:#FEF3F2; --risk-a-line:#F9D6D2;
+    --risk-b:#B54708; --risk-b-bg:#FFFAEB; --risk-b-line:#F7E0B8;
+    --risk-c:#8A6100; --risk-c-bg:#FEFBEC; --risk-c-line:#F2E6B8;
   }
-  .block-container{padding-top:1.6rem; padding-bottom:3rem; max-width:1240px;}
+  html, body, [class*="css"]{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .block-container{padding-top:1.4rem; padding-bottom:4rem; max-width:1180px;}
   #MainMenu, footer{visibility:hidden;}
 
+  /* ---------- Hero ---------- */
   .hm-hero{
-    background:linear-gradient(135deg,#123d24 0%,#1f7a3f 55%,#2f9e56 100%);
-    border-radius:20px; padding:26px 30px; color:#fff; position:relative; overflow:hidden;
-    box-shadow:0 12px 30px -12px rgba(18,61,36,.55);
+    position:relative; overflow:hidden; border-radius:22px;
+    padding:30px 34px 26px; color:#fff;
+    background:
+      radial-gradient(1200px 300px at 12% -10%, rgba(84,190,124,.45), transparent 60%),
+      radial-gradient(900px 260px at 92% 120%, rgba(24,110,64,.55), transparent 62%),
+      linear-gradient(135deg,#0C3A21 0%,#12522F 52%,#1B7A43 100%);
+    box-shadow:0 18px 40px -22px rgba(12,58,33,.75), inset 0 1px 0 rgba(255,255,255,.08);
   }
-  .hm-hero:after{
-    content:""; position:absolute; right:-40px; top:-60px; width:240px; height:240px;
-    background:radial-gradient(circle,rgba(255,255,255,.18),transparent 65%); border-radius:50%;
+  .hm-hero:before{
+    content:""; position:absolute; inset:0; opacity:.16;
+    background-image:radial-gradient(rgba(255,255,255,.55) 1px, transparent 1px);
+    background-size:18px 18px; mask-image:linear-gradient(120deg,#000,transparent 72%);
   }
-  .hm-hero h1{margin:0 0 6px; font-size:27px; font-weight:700; letter-spacing:.3px; color:#fff;}
-  .hm-hero p{margin:0; color:#d8ecdd; font-size:14px;}
-  .hm-chips{margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;}
+  .hm-hero-in{position:relative; z-index:1}
+  .hm-eyebrow{
+    display:inline-flex; align-items:center; gap:7px; font-size:11.5px; letter-spacing:1.4px;
+    text-transform:uppercase; color:#BFE3CB; font-weight:700; margin-bottom:10px;
+  }
+  .hm-eyebrow i{width:6px; height:6px; border-radius:50%; background:#5DDB8E; display:inline-block;
+    box-shadow:0 0 0 4px rgba(93,219,142,.18);}
+  .hm-hero h1{
+    margin:0; font-size:29px; line-height:1.25; font-weight:700; letter-spacing:.4px; color:#fff;
+  }
+  .hm-hero p{margin:8px 0 0; color:rgba(226,242,232,.86); font-size:13.5px; letter-spacing:.2px;}
+  .hm-chips{margin-top:18px; display:flex; gap:8px; flex-wrap:wrap;}
   .hm-chip{
-    display:inline-block; padding:4px 11px; border-radius:999px; font-size:12.5px;
-    background:rgba(255,255,255,.14); color:#eaf6ec; border:1px solid rgba(255,255,255,.18);
+    display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:999px;
+    font-size:12px; letter-spacing:.3px; color:#E8F6EC;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    backdrop-filter:blur(6px);
+  }
+  .hm-chip b{font-weight:700; color:#fff; font-variant-numeric:tabular-nums;}
+
+  /* ---------- 平台切换 ---------- */
+  div[data-testid="stButtonGroup"] button, div[data-testid="stSegmentedControl"] button{
+    border-radius:9px !important; font-size:13px !important; font-weight:600 !important;
+    padding:6px 16px !important; border:1px solid var(--line) !important;
+    transition:all .16s ease;
+  }
+  div[data-testid="stButtonGroup"] button[aria-checked="true"],
+  div[data-testid="stSegmentedControl"] button[aria-checked="true"]{
+    background:var(--green-soft) !important; color:var(--green-d) !important;
+    border-color:#C8E4D2 !important; box-shadow:inset 0 0 0 1px #C8E4D2;
   }
 
+  /* ---------- 卡片与区块 ---------- */
   .hm-card{
-    background:var(--hm-card); border:1px solid var(--hm-line); border-radius:16px;
-    padding:18px 20px; box-shadow:0 1px 2px rgba(16,24,18,.04);
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 20px; box-shadow:0 1px 2px rgba(15,26,19,.04);
   }
-  .hm-item-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
-  .hm-idx{
-    width:26px; height:26px; border-radius:8px; background:#eef4ef; color:#2a5b3c;
-    display:inline-flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;
+  .hm-section{display:flex; align-items:baseline; gap:10px; margin:26px 0 12px;}
+  .hm-section h2{
+    margin:0; font-size:17px; font-weight:700; letter-spacing:.3px; color:var(--ink);
   }
-  .hm-risk{font-size:12px; padding:2px 9px; border-radius:999px; font-weight:600;}
-  .hm-risk-a{background:#fdeaea; color:#a31616;}
-  .hm-risk-b{background:#fdf0e3; color:#9a4b06;}
-  .hm-risk-c{background:#fdf6dd; color:#7d5c05;}
-  .hm-risk-d{background:#e9f5ec; color:#1f6b39;}
-  .hm-tag{
-    font-size:12px; padding:2px 9px; border-radius:999px; background:#f1f4f2;
-    color:#4a5a4f; border:1px solid #e6ebe7;
+  .hm-section .cnt{
+    font-size:12px; color:var(--muted); background:var(--green-soft);
+    border:1px solid #D9EBDD; border-radius:999px; padding:2px 9px; font-variant-numeric:tabular-nums;
   }
-  .hm-orig{
-    white-space:pre-wrap; line-height:1.95; font-size:15px;
-    background:#fbfcfb; border:1px solid #eef2ee; border-radius:12px; padding:13px 15px;
-  }
-  mark{background:#ffe0e0; color:#9c1010; padding:0 3px; border-radius:4px; font-weight:600;}
+  .hm-section .hint{margin-left:auto; font-size:12px; color:var(--muted-2);}
 
-  .hm-sug-block{
-    margin-top:10px; background:#f2f9f3; border:1px solid #d9ecdd; border-left:3px solid #2f9e56;
-    border-radius:10px; padding:11px 14px; font-size:14px; line-height:1.9;
-  }
-  .hm-sug-title{font-size:12.5px; color:#3d6b4a; font-weight:700; margin-bottom:4px; letter-spacing:.5px;}
-  .hm-sug-row{color:#2c3d31;}
-  .hm-sug-row .from{color:#a31616; text-decoration:line-through; text-decoration-thickness:1px;}
-  .hm-sug-row .to{color:#1f6b39; font-weight:600;}
-
+  /* ---------- 指标 ---------- */
   div[data-testid="stMetric"]{
-    background:var(--hm-card); border:1px solid var(--hm-line); border-radius:14px;
-    padding:14px 16px; box-shadow:0 1px 2px rgba(16,24,18,.04);
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:16px 18px 14px; box-shadow:0 1px 2px rgba(15,26,19,.04);
+    transition:box-shadow .18s ease, transform .18s ease;
   }
-  div[data-testid="stMetricValue"]{font-size:26px; font-weight:700; color:var(--hm-ink);}
-  div[data-testid="stMetricLabel"]{color:var(--hm-muted);}
+  div[data-testid="stMetric"]:hover{box-shadow:0 10px 22px -16px rgba(15,26,19,.35); transform:translateY(-1px);}
+  div[data-testid="stMetricLabel"] p{
+    font-size:11.5px !important; letter-spacing:.6px; color:var(--muted) !important; font-weight:600;
+  }
+  div[data-testid="stMetricValue"]{
+    font-size:27px !important; font-weight:700 !important; color:var(--ink) !important;
+    font-variant-numeric:tabular-nums; letter-spacing:.5px;
+  }
 
+  /* ---------- 结果卡 ---------- */
+  .hm-item{
+    position:relative; background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 20px 16px 22px; box-shadow:0 1px 2px rgba(15,26,19,.04);
+    transition:box-shadow .18s ease, border-color .18s ease;
+  }
+  .hm-item:hover{box-shadow:0 14px 30px -22px rgba(15,26,19,.5); border-color:#DCE6DF;}
+  .hm-item:before{
+    content:""; position:absolute; left:0; top:14px; bottom:14px; width:3px; border-radius:3px;
+    background:var(--green-l); opacity:.55;
+  }
+  .hm-item.risk-a:before{background:var(--risk-a); opacity:.9;}
+  .hm-item.risk-b:before{background:var(--risk-b); opacity:.85;}
+  .hm-item.risk-c:before{background:#D9A400; opacity:.85;}
+  .hm-item.clean:before{background:#CFE3D5; opacity:.8;}
+
+  .hm-head{display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:12px;}
+  .hm-idx{
+    font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:#4B5A50; background:#F1F5F2; border:1px solid var(--line);
+    border-radius:7px; padding:4px 7px; font-variant-numeric:tabular-nums;
+  }
+  .hm-risk{
+    font-size:11.5px; font-weight:700; letter-spacing:.4px; padding:3px 10px; border-radius:999px;
+    border:1px solid transparent;
+  }
+  .hm-risk-a{color:var(--risk-a); background:var(--risk-a-bg); border-color:var(--risk-a-line);}
+  .hm-risk-b{color:var(--risk-b); background:var(--risk-b-bg); border-color:var(--risk-b-line);}
+  .hm-risk-c{color:var(--risk-c); background:var(--risk-c-bg); border-color:var(--risk-c-line);}
+  .hm-risk-d{color:var(--green); background:var(--green-soft); border-color:#D5E9DC;}
+  .hm-tag{
+    font-size:11.5px; letter-spacing:.2px; padding:3px 9px; border-radius:6px;
+    background:#F5F8F6; color:#5B6A60; border:1px solid var(--line);
+  }
+  .hm-tag.ok{background:#EDF7F0; color:var(--green-d); border-color:#D3E9DA;}
+  .hm-tag.cat{background:#F7F9F7; color:#6A786E;}
+  .hm-spacer{margin-left:auto;}
+
+  .hm-orig{
+    white-space:pre-wrap; line-height:2; font-size:14.8px; color:var(--ink-2);
+    background:#FBFCFB; border:1px solid var(--line-2); border-radius:10px; padding:13px 15px;
+  }
+  mark{
+    background:linear-gradient(180deg,transparent 58%,#FFD9D4 58%);
+    color:#8E1A0F; font-weight:600; padding:0 2px; border-radius:2px;
+  }
+
+  /* ---------- 推荐修改 ---------- */
+  .hm-sug{margin-top:12px; border:1px solid #DCEBE0; border-radius:12px; overflow:hidden;}
+  .hm-sug-head{
+    display:flex; align-items:center; gap:7px; padding:9px 14px;
+    background:linear-gradient(90deg,#F2FAF4,#FAFDFB); border-bottom:1px solid #E4F0E7;
+    font-size:11.5px; font-weight:700; letter-spacing:1px; color:#2F6B45; text-transform:uppercase;
+  }
+  .hm-sug-body{padding:6px 14px 10px; background:#fff;}
+  .hm-sug-row{
+    display:flex; gap:10px; align-items:flex-start; padding:7px 0; font-size:13.8px; line-height:1.75;
+    border-bottom:1px dashed #EDF3EE;
+  }
+  .hm-sug-row:last-child{border-bottom:none;}
+  .hm-sug-row .from{
+    flex:0 0 auto; color:#9A2B1E; background:#FDF1EF; border:1px solid #F6DAD5;
+    border-radius:5px; padding:1px 7px; font-size:12.5px; text-decoration:line-through;
+    text-decoration-thickness:.5px; text-decoration-color:#C97A6F; white-space:nowrap;
+  }
+  .hm-sug-row .arrow{color:#A7B7AC; flex:0 0 auto;}
+  .hm-sug-row .to{color:#20563A; font-weight:500;}
+
+  /* ---------- 空状态 ---------- */
+  .hm-empty{
+    margin-top:22px; border:1px dashed #D8E4DB; border-radius:18px; background:
+      linear-gradient(180deg,#FBFDFB,#F6FAF7); padding:30px 28px; text-align:center;
+  }
+  .hm-empty h3{margin:0 0 6px; font-size:16px; color:var(--ink); font-weight:700;}
+  .hm-empty p{margin:0 0 18px; color:var(--muted); font-size:13.5px;}
+  .hm-steps{display:flex; gap:12px; justify-content:center; flex-wrap:wrap;}
+  .hm-step{
+    background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 16px;
+    min-width:190px; text-align:left; box-shadow:0 1px 2px rgba(15,26,19,.03);
+  }
+  .hm-step b{display:block; font-size:11px; letter-spacing:1px; color:var(--green); margin-bottom:4px;}
+  .hm-step span{font-size:13px; color:var(--ink-2); line-height:1.6;}
+
+  /* 结果卡容器（st.container border） */
+  div[data-testid="stVerticalBlockBorderWrapper"]{
+    border-radius:14px !important; border:1px solid var(--line) !important;
+    background:#fff; box-shadow:0 1px 2px rgba(15,26,19,.04);
+    transition:box-shadow .18s ease, border-color .18s ease;
+  }
+  div[data-testid="stVerticalBlockBorderWrapper"]:hover{
+    box-shadow:0 14px 30px -24px rgba(15,26,19,.55); border-color:#DCE6DF !important;
+  }
+
+  /* ---------- 控件 ---------- */
   .stButton>button{
-    border-radius:10px; border:1px solid var(--hm-line); font-weight:600;
-    transition:all .15s ease;
+    border-radius:10px; border:1px solid var(--line); font-weight:600; font-size:13.5px;
+    transition:all .16s ease; padding:.5rem 1rem;
   }
+  .stButton>button:hover{border-color:#C9DCCF; color:var(--green-d);}
   .stButton>button[kind="primary"]{
-    background:linear-gradient(135deg,#1f7a3f,#2f9e56); border:none;
-    box-shadow:0 6px 16px -8px rgba(31,122,63,.7);
+    background:linear-gradient(135deg,var(--green) 0%,var(--green-l) 100%);
+    border:1px solid rgba(0,0,0,.06); color:#fff;
+    box-shadow:0 8px 18px -12px rgba(27,122,67,.9), inset 0 1px 0 rgba(255,255,255,.18);
   }
-  .stButton>button[kind="primary"]:hover{transform:translateY(-1px); box-shadow:0 10px 20px -8px rgba(31,122,63,.8);}
-
-  .stTextArea textarea{border-radius:12px; border-color:var(--hm-line); font-size:15px; line-height:1.8;}
-  .stTextArea textarea:focus{box-shadow:0 0 0 3px rgba(47,158,86,.16); border-color:#7cc194;}
-
-  div[data-testid="stExpander"]{border-radius:12px; border-color:var(--hm-line);}
-  div[data-testid="stExpander"] summary{font-size:14px;}
-  /* 改写稿是整段口播，长句要换行，不要横向截断 */
-  div[data-testid="stCode"]{border-radius:12px; max-width:100%;}
+  .stButton>button[kind="primary"]:hover{
+    transform:translateY(-1px); box-shadow:0 12px 22px -12px rgba(27,122,67,.95);
+    color:#fff;
+  }
+  .stTextArea textarea{
+    border-radius:12px; border:1px solid var(--line); font-size:14.5px; line-height:1.9;
+    padding:14px 16px; color:var(--ink-2); background:#FDFEFD;
+  }
+  .stTextArea textarea:focus{
+    border-color:#8CC9A3; box-shadow:0 0 0 4px rgba(46,154,87,.12); background:#fff;
+  }
+  div[data-testid="stExpander"]{
+    border:1px solid var(--line); border-radius:11px; background:#FCFDFC; overflow:hidden;
+  }
+  div[data-testid="stExpander"] summary{font-size:13px; color:#516057; font-weight:600;}
+  div[data-testid="stExpander"] summary:hover{color:var(--green-d);}
+  div[data-testid="stCode"]{border-radius:11px; max-width:100%; border:1px solid var(--line-2);}
   div[data-testid="stCode"] pre{
     white-space:pre-wrap !important; word-break:break-word; overflow-x:hidden;
-    line-height:1.95; font-size:14.5px; padding-right:6px;
+    line-height:2; font-size:14px; padding-right:6px; background:#FBFCFB;
   }
-  .stTabs [data-baseweb="tab-list"]{gap:6px;}
-  .stTabs [data-baseweb="tab"]{border-radius:9px 9px 0 0; padding:8px 16px; font-weight:600;}
+  div[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"]{box-shadow:0 2px 6px rgba(15,26,19,.2);}
+  .stTabs [data-baseweb="tab-list"]{gap:4px; border-bottom:1px solid var(--line);}
+  .stTabs [data-baseweb="tab"]{
+    border-radius:9px 9px 0 0; padding:8px 16px; font-weight:600; font-size:13.5px; color:var(--muted);
+  }
+  .stTabs [aria-selected="true"]{color:var(--green-d);}
+  .stTabs [data-baseweb="tab-highlight"]{background:var(--green);}
+
+  .hm-foot{
+    margin-top:34px; padding-top:16px; border-top:1px solid var(--line);
+    display:flex; gap:14px; flex-wrap:wrap; color:var(--muted-2); font-size:11.5px; letter-spacing:.3px;
+  }
+  .hm-foot b{color:#7C8A81; font-weight:600;}
+  @media (max-width:720px){
+    .hm-hero{padding:24px 22px; border-radius:18px;}
+    .hm-hero h1{font-size:23px;}
+    .hm-step{min-width:100%;}
+    .hm-item{padding:16px 16px 14px 18px;}
+  }
 </style>
 """,
     unsafe_allow_html=True,
@@ -197,16 +346,17 @@ platform_only = [r for r in auto_rules if "all" not in r["platform"]]
 
 st.markdown(
     f"""
-<div class="hm-hero">
-  <h1>🌿 花木文案合规校验</h1>
-  <p>淘宝 / 拼多多 / 京东三平台 —— 通用底座 + 平台差异层，一行一条粘贴整场脚本</p>
+<div class="hm-hero"><div class="hm-hero-in">
+  <div class="hm-eyebrow"><i></i>Taobao · PDD · JD 合规校验</div>
+  <h1>花木文案合规校验</h1>
+  <p>通用底座 + 平台差异层：一行一条粘贴整场脚本，自动标红、给依据、出改写</p>
   <div class="hm-chips">
-    <span class="hm-chip">{len(universal)} 条通用规则</span>
-    <span class="hm-chip">{len(platform_only)} 条平台专属</span>
-    <span class="hm-chip">{len(categories)} 个类别</span>
-    <span class="hm-chip">未命中不调用模型 · 不计费</span>
+    <span class="hm-chip"><b>{len(universal)}</b> 条通用规则</span>
+    <span class="hm-chip"><b>{len(platform_only)}</b> 条平台专属</span>
+    <span class="hm-chip"><b>{len(categories)}</b> 个类别</span>
+    <span class="hm-chip">未命中不调用模型</span>
   </div>
-</div>
+</div></div>
 """,
     unsafe_allow_html=True,
 )
@@ -348,6 +498,22 @@ with tab_check:
 
     result = st.session_state.get("bulk_result")
 
+    if not result:
+        st.markdown(
+            """
+<div class="hm-empty">
+  <h3>粘贴脚本，开始体检</h3>
+  <p>一行一条，一次可以跑完整场口播稿</p>
+  <div class="hm-steps">
+    <div class="hm-step"><b>STEP 01</b><span>选平台<br>通用 / 淘宝 / 拼多多 / 京东</span></div>
+    <div class="hm-step"><b>STEP 02</b><span>粘贴文案<br>每行一条，自动去空行</span></div>
+    <div class="hm-step"><b>STEP 03</b><span>看结果<br>依据 + 推荐修改 + 合规改写</span></div>
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
     if result:
         items = result["items"]
         total_hits = sum(len(i["hits"]) for i in items)
@@ -387,14 +553,21 @@ with tab_check:
                     mime="text/plain",
                 )
 
-            st.markdown("### 逐条结果")
+            col_a, col_b = st.columns([1, 0.42])
+            col_a.markdown(
+                f'<div class="hm-section"><h2>逐条结果</h2>'
+                f'<span class="cnt">{len(items)} 条</span>'
+                f'<span class="hint">同一条文案的全部命中已按风险降序</span></div>',
+                unsafe_allow_html=True,
+            )
             for item in items:
                 hits = item["hits"]
                 if not hits:
                     with st.container(border=True):
                         st.markdown(
-                            f'<div class="hm-item-head"><span class="hm-idx">{item["idx"]}</span>'
-                            f'<span class="hm-tag">未命中</span></div>'
+                            f'<div class="hm-head"><span class="hm-idx">#{item["idx"]:02d}</span>'
+                            f'<span class="hm-risk hm-risk-d">未命中</span>'
+                            f'<span class="hm-tag cat">无需修改</span></div>'
                             f'<div class="hm-orig">{html.escape(item["text"])}</div>',
                             unsafe_allow_html=True,
                         )
@@ -405,16 +578,12 @@ with tab_check:
                 cat_txt = " · ".join(f"{c} {categories.get(c, '')}" for c in cats)
                 with st.container(border=True):
                     st.markdown(
-                        f'<div class="hm-item-head">'
-                        f'<span class="hm-idx">{item["idx"]}</span>'
-                        f'<span class="hm-risk {RISK_CLASS.get(risk, "hm-risk-d")}">{RISK_BADGE.get(risk, "")} {risk}</span>'
+                        f'<div class="hm-head">'
+                        f'<span class="hm-idx">#{item["idx"]:02d}</span>'
+                        f'<span class="hm-risk {RISK_CLASS.get(risk, "hm-risk-d")}">{risk}</span>'
                         f'<span class="hm-tag">{len(hits)} 处命中</span>'
-                        f'<span class="hm-tag">{html.escape(cat_txt)}</span>'
-                        + (
-                            '<span class="hm-tag" style="background:#e8f5ec;color:#1f6b39;border-color:#cfe8d8">已改写</span>'
-                            if item["rewritten"]
-                            else ""
-                        )
+                        f'<span class="hm-tag cat">{html.escape(cat_txt)}</span>'
+                        + ('<span class="hm-tag ok">已改写</span>' if item["rewritten"] else '<span class="hm-tag">仅体检</span>')
                         + f'</div><div class="hm-orig">{highlight(item["text"], hits)}</div>',
                         unsafe_allow_html=True,
                     )
@@ -423,12 +592,15 @@ with tab_check:
                     sugg = [(h["matched"], h["suggestion"]) for h in hits if h.get("suggestion")]
                     if sugg:
                         rows = "".join(
-                            f'<div class="hm-sug-row">{html.escape(src)} → '
+                            f'<div class="hm-sug-row"><span class="from">{html.escape(src)}</span>'
+                            f'<span class="arrow">→</span>'
                             f'<span class="to">{html.escape(dst)}</span></div>'
                             for src, dst in sugg
                         )
                         st.markdown(
-                            f'<div class="hm-sug-block"><div class="hm-sug-title">推荐修改文案</div>{rows}</div>',
+                            '<div class="hm-sug">'
+                            '<div class="hm-sug-head">推荐修改文案</div>'
+                            f'<div class="hm-sug-body">{rows}</div></div>',
                             unsafe_allow_html=True,
                         )
 
@@ -454,8 +626,6 @@ with tab_check:
                                 st.markdown(notes)
                     elif item["error"]:
                         st.error(f"改写失败：{item['error'][:200]}")
-                    else:
-                        st.caption("未改写（超出上限或只做体检）")
 
         if manual_items:
             with st.expander(f"⚠️ 另有 {len(manual_items)} 条需人工复核（不计入命中数）"):
@@ -496,3 +666,15 @@ with tab_rules:
     st.divider()
     st.markdown("**替换表分组**")
     st.write("、".join(f"`{k}`（{len(v)} 条）" for k, v in replacements.items() if isinstance(v, dict)))
+
+
+st.markdown(
+    f"""
+<div class="hm-foot">
+  <b>规则库 v1.1</b>
+  <span>{len(universal)} 条通用 · {len(platform_only)} 条平台专属 · {len(categories)} 个类别</span>
+  <span>AI 辅助建议，发布前请人工确认</span>
+</div>
+""",
+    unsafe_allow_html=True,
+)
