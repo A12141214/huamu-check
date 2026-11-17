@@ -85,6 +85,14 @@ st.markdown(
   .hm-chip b{font-weight:700; color:#fff; font-variant-numeric:tabular-nums;}
 
   /* ---------- 平台切换 ---------- */
+  .hm-plat{
+    margin:22px 0 6px; display:flex; align-items:center; gap:12px;
+  }
+  .hm-plat .lb{
+    font-size:11.5px; letter-spacing:1.2px; color:var(--muted-2); font-weight:700; text-transform:uppercase;
+  }
+  .hm-plat .line{flex:1; height:1px; background:linear-gradient(90deg,var(--line),transparent);}
+
   div[data-testid="stButtonGroup"] button, div[data-testid="stSegmentedControl"] button{
     border-radius:9px !important; font-size:13px !important; font-weight:600 !important;
     padding:6px 16px !important; border:1px solid var(--line) !important;
@@ -363,6 +371,10 @@ st.markdown(
 
 # 平台选择：all = 通用底座，其余叠加该平台的差异层规则
 _pname_to_code = {v: k for k, v in platforms.items()}
+st.markdown(
+    '<div class="hm-plat"><span class="lb">校验平台</span><span class="line"></span></div>',
+    unsafe_allow_html=True,
+)
 _choice = st.segmented_control(
     "校验平台",
     list(platforms.values()),
